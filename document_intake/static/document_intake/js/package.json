@@ -1,0 +1,5 @@
+{
+  "//": "Marks these files as ES modules for node --test / --check. No dependencies, no build.",
+  "type": "module",
+  "private": true
+}

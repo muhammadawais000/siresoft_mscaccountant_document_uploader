@@ -8,4 +8,5 @@ app_name = "document_intake"
 
 urlpatterns = [
     path("", views.DocumentListView.as_view(), name="document-list"),
+    path("documents/<uuid:pk>/", views.DocumentReviewView.as_view(), name="document-review"),
 ]

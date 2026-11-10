@@ -2,7 +2,7 @@
 UV ?= uv
 MANAGE = $(UV) run python manage.py
 
-.PHONY: help install services run worker migrate makemigrations test cov lint format typecheck check seed check-ollama up down
+.PHONY: help install services run worker migrate makemigrations test jstest cov lint format typecheck check seed check-ollama up down
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -35,6 +35,10 @@ makemigrations: ## Create migrations for document_intake
 test: ## Run the test suite
 	$(UV) run pytest
 
+jstest: ## JS unit tests + syntax check (node, no dependencies, no build)
+	for f in document_intake/static/document_intake/js/*.js; do node --check $$f || exit 1; done
+	node --test document_intake/tests/js/
+
 cov: ## Run tests with coverage for services/ and validators/
 	$(UV) run pytest --cov=document_intake --cov-report=term-missing
 
@@ -49,7 +53,7 @@ format: ## Auto-format and fix lint issues
 typecheck: ## mypy on the app package
 	$(UV) run mypy document_intake config
 
-check: lint typecheck test ## Everything CI runs
+check: lint typecheck test jstest ## Everything CI runs
 
 seed: ## Create a demo user and sample documents
 	$(MANAGE) seed_demo

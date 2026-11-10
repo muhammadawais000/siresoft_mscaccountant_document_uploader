@@ -1,14 +1,111 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Documents</title>
-</head>
-<body>
-  <main>
-    <h1>Documents</h1>
-    <p>The document list screen is built in delivery step 7.</p>
-  </main>
-</body>
-</html>
+{% extends "document_intake/base.html" %}
+{% load static %}
+{% block title %}Documents{% endblock %}
+{% block page_title %}Documents{% endblock %}
+{% block actions %}
+  <button class="btn btn--primary" type="button" data-pick="file-input">Upload</button>
+{% endblock %}
+
+{% block content %}
+<div class="stack">
+  <section class="panel" data-upload id="upload-panel" aria-labelledby="upload-title">
+    <div class="panel__header">
+      <h2 class="panel__title" id="upload-title">Upload documents</h2>
+    </div>
+    <div class="panel__body">
+      <div class="upload">
+        <div class="dropzone" data-dropzone>
+          <div class="dropzone__title">Drag files here</div>
+          <div class="dropzone__actions">
+            <button class="btn" type="button" data-pick="file-input">Choose files</button>
+            <button class="btn dropzone__camera" type="button" data-pick="camera-input">Take photo</button>
+          </div>
+          <div class="dropzone__hint">
+            {{ allowed_extensions_text }} · up to {{ max_upload_mb }} MB each
+          </div>
+          <input id="file-input" class="visually-hidden" type="file" multiple
+                 accept="{{ accept }}" tabindex="-1" aria-hidden="true">
+          <input id="camera-input" class="visually-hidden" type="file"
+                 accept="image/*" capture="environment" tabindex="-1" aria-hidden="true">
+        </div>
+        <div class="upload__options">
+          <div class="field">
+            <label class="field__label" for="doc-type">Document type</label>
+            <select class="select" id="doc-type" data-doc-type>
+              {% for value, label in doc_types %}
+              <option value="{{ value }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+            <span class="field__hint">Applies to the next files you add. Auto-detect asks the model.</span>
+          </div>
+        </div>
+      </div>
+      <ul class="queue" data-queue aria-label="Uploads"></ul>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="list-title">
+    <h2 class="visually-hidden" id="list-title">Document list</h2>
+    <form class="filters" data-filters role="search" aria-label="Filter documents">
+      <div class="field">
+        <label class="field__label" for="f-search">Search</label>
+        <input class="input" id="f-search" name="search" type="search" placeholder="File name"
+               autocomplete="off" maxlength="100">
+      </div>
+      <div class="field">
+        <label class="field__label" for="f-status">Status</label>
+        <select class="select" id="f-status" name="status">
+          <option value="">All statuses</option>
+          {% for value, label in statuses %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label class="field__label" for="f-type">Type</label>
+        <select class="select" id="f-type" name="doc_type">
+          <option value="">All types</option>
+          {% for value, label in doc_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label class="field__label" for="f-from">Uploaded from</label>
+        <input class="input" id="f-from" name="created_from" type="date">
+      </div>
+      <div class="field">
+        <label class="field__label" for="f-to">Uploaded to</label>
+        <input class="input" id="f-to" name="created_to" type="date">
+      </div>
+      <input type="hidden" name="ordering" value="-created_at">
+      <button class="btn btn--ghost" type="reset">Clear</button>
+    </form>
+
+    <div class="table-wrap">
+      <table class="data-table" data-documents>
+        <caption class="visually-hidden">Uploaded documents</caption>
+        <thead>
+          <tr>
+            <th scope="col" data-sort="original_filename"><button class="data-table__sort" type="button">File</button></th>
+            <th scope="col">Type</th>
+            <th scope="col">Status</th>
+            <th scope="col" class="num" data-sort="created_at"><button class="data-table__sort" type="button">Uploaded</button></th>
+            <th scope="col" class="num">Open issues</th>
+            <th scope="col"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody aria-live="off"></tbody>
+      </table>
+    </div>
+    <div class="panel__footer">
+      <span data-summary aria-live="polite"></span>
+      <div class="pager">
+        <button class="btn btn--sm" type="button" data-prev>Previous</button>
+        <button class="btn btn--sm" type="button" data-next>Next</button>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ page_config|json_script:"intake-config" }}
+<script type="module" src="{% static 'document_intake/js/list.js' %}"></script>
+{% endblock %}

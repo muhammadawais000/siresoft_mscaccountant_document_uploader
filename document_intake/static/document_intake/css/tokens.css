@@ -1,0 +1,81 @@
+/* Design tokens. Every colour, size and radius used by the module is defined here.
+   Contrast (WCAG AA) checked for text pairs noted below. */
+:root {
+  /* Ink and surfaces */
+  --c-ink: #1b2333;            /* body text on white: 15.7:1 */
+  --c-ink-muted: #545d6e;      /* secondary text on white: 6.6:1 */
+  --c-ink-faint: #6b7385;      /* captions on white 4.8:1, on sunken 4.6:1 */
+  --c-bg: #f5f6f8;
+  --c-surface: #ffffff;
+  --c-surface-sunken: #f9fafb;
+  --c-border: #d9dde3;
+  --c-border-strong: #b8bfca;
+
+  /* Brand */
+  --c-navy: #1f2a44;           /* sidebar, primary buttons; white on navy: 14.3:1 */
+  --c-navy-hover: #2a3757;
+  --c-navy-ink: #ffffff;
+  --c-nav-muted: #c3cad8;      /* inactive nav text on navy: 8.7:1 */
+  --c-nav-active-bg: #2b3a5c;
+  --c-nav-indicator: #f04452;  /* selected nav item (firm red); 3.0:1+ on navy (non-text) */
+
+  /* Single accent for links and focus */
+  --c-accent: #2f6690;         /* links on white: 6.1:1 */
+  --c-accent-hover: #234f70;
+  --c-focus: #2f6690;
+
+  /* Semantic: always paired with text, never colour alone */
+  --c-ok-ink: #1d6b45;         /* on --c-ok-bg: 5.7:1 */
+  --c-ok-bg: #e5f4ec;
+  --c-ok-border: #9fd3b8;
+  --c-warn-ink: #7a4d00;       /* on --c-warn-bg: 6.6:1 */
+  --c-warn-bg: #fff4d6;
+  --c-warn-border: #f0cf7a;
+  --c-err-ink: #a3201a;        /* on --c-err-bg: 6.6:1 */
+  --c-err-bg: #fdecea;
+  --c-err-border: #f2b3ad;
+  --c-info-ink: #2f4a6b;
+  --c-info-bg: #eaf0f7;
+  --c-info-border: #bccbdd;
+  --c-neutral-ink: #454d5c;
+  --c-neutral-bg: #eef0f3;
+
+  /* Typography */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-base: 14px;
+  --fs-md: 15px;
+  --fs-lg: 18px;
+  --fs-xl: 20px;
+  --lh-tight: 1.25;
+  --lh-base: 1.45;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+
+  /* Spacing (4px grid) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* Shape and depth */
+  --radius-sm: 3px;
+  --radius: 4px;
+  --shadow-pop: 0 4px 16px rgb(27 35 51 / 0.14);
+  --focus-ring: 0 0 0 2px var(--c-surface), 0 0 0 4px var(--c-focus);
+
+  /* Layout */
+  --sidebar-w: 216px;
+  --topbar-h: 56px;
+  --content-max: 1280px;
+  --row-h: 36px;
+
+  --t-fast: 120ms ease-out;
+}

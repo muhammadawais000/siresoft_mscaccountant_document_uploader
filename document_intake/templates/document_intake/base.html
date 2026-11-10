@@ -1,0 +1,56 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>{% block title %}Documents{% endblock %} · Document intake</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%231f2a44'/%3E%3Crect x='4' y='3' width='8' height='10' rx='1' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="{% static 'document_intake/css/tokens.css' %}">
+  <link rel="stylesheet" href="{% static 'document_intake/css/base.css' %}">
+  <link rel="stylesheet" href="{% static 'document_intake/css/layout.css' %}">
+  <link rel="stylesheet" href="{% static 'document_intake/css/components.css' %}">
+  {% block head %}{% endblock %}
+</head>
+<body data-api-base="{{ intake_api_base }}">
+  <a class="visually-hidden" href="#main">Skip to content</a>
+  <div class="app">
+    {% block sidebar %}
+    <aside class="sidebar" aria-label="Main">
+      <div class="sidebar__brand">
+        <span class="sidebar__brand-mark" aria-hidden="true">MSC</span>
+        <span>Document intake</span>
+      </div>
+      <nav class="sidebar__nav">
+        <div class="sidebar__section">Bookkeeping</div>
+        <a class="sidebar__link" href="{% url 'document_intake:document-list' %}"
+           {% if nav_active == 'documents' %}aria-current="page"{% endif %}>Documents</a>
+      </nav>
+      {% if user.is_authenticated %}
+      <div class="sidebar__footer">
+        <div>{{ user.get_full_name|default:user.get_username }}</div>
+        {% if logout_url %}
+        <form method="post" action="{{ logout_url }}">
+          {% csrf_token %}
+          <button class="btn btn--sm btn--ghost sidebar__logout" type="submit">Sign out</button>
+        </form>
+        {% endif %}
+      </div>
+      {% endif %}
+    </aside>
+    {% endblock %}
+    <div class="main">
+      <header class="topbar">
+        <h1 class="topbar__title">{% block page_title %}{% endblock %}</h1>
+        <div class="topbar__actions">{% block actions %}{% endblock %}</div>
+      </header>
+      <main id="main" class="content" tabindex="-1">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <div id="sr-status" class="visually-hidden" role="status" aria-live="polite"></div>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -64,4 +64,4 @@ def test_schema_requires_login(api_client) -> None:
 def test_ui_requires_login(client) -> None:
     response = client.get(reverse("document_intake:document-list"))
     assert response.status_code == 302
-    assert "/admin/login/" in response["Location"]
+    assert response["Location"].startswith("/accounts/login/")
