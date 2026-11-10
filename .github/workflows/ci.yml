@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: intake
+          POSTGRES_USER: intake
+          POSTGRES_PASSWORD: intake
+        ports: ["55433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U intake" --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libmagic1
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy document_intake config
+      - run: uv run pytest --cov=document_intake --cov-report=term-missing

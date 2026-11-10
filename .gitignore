@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+/staticfiles/
+/private_media/
+/media/
+*.log
+.DS_Store
+.idea/
+.vscode/
+# Requirement specs and client documents stay out of git
+*.docx
