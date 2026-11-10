@@ -18,6 +18,8 @@ DEFAULTS: dict[str, Any] = {
         "image/jpeg": (".jpg", ".jpeg"),
         "image/png": (".png",),
     },
+    # Images above this many pixels are rejected (decompression-bomb guard).
+    "MAX_IMAGE_PIXELS": 50_000_000,
     # Django storage alias for documents. It must not be publicly served.
     "STORAGE_ALIAS": "intake_private",
     "UPLOAD_PATH_PREFIX": "intake",
@@ -36,8 +38,11 @@ DEFAULTS: dict[str, Any] = {
     # Validation
     "AMOUNT_TOLERANCE": "0.01",
     "EXPECTED_TAX_RATE": "0.13",  # Ontario HST, warning only
-    # Access control: dotted paths of DRF permission classes for the API.
+    # Access control. A portal swaps these for its own role / client-assignment rules.
+    # PERMISSION_CLASSES: DRF permission classes for every API view.
+    # DOCUMENT_SCOPE: function (user, queryset) -> queryset of documents the user may see.
     "PERMISSION_CLASSES": ("document_intake.api.permissions.IsOwnerOrStaff",),
+    "DOCUMENT_SCOPE": "document_intake.services.access.default_document_scope",
     # Feature flags
     "FEATURE_AUTO_CLASSIFY": True,
     "FEATURE_DUPLICATE_DETECTION": True,

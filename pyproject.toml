@@ -74,6 +74,11 @@ exclude = ["migrations/", "tests/"]
 module = ["document_intake.tests.*", "document_intake.migrations.*"]
 ignore_errors = true
 
+[[tool.mypy.overrides]]
+# Celery ships no type hints, so @shared_task is an untyped decorator.
+module = ["document_intake.tasks"]
+disallow_untyped_decorators = false
+
 [tool.django-stubs]
 django_settings_module = "config.settings.test"
 
