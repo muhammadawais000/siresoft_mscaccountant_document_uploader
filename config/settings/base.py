@@ -143,6 +143,7 @@ DOCUMENT_INTAKE = {
     "OLLAMA_VISION_MODEL": env("OLLAMA_VISION_MODEL", default=""),
     "OLLAMA_TEXT_MODEL": env("OLLAMA_TEXT_MODEL", default=""),
     "OLLAMA_TIMEOUT_SECONDS": env.int("OLLAMA_TIMEOUT_SECONDS", default=180),
+    "OLLAMA_NUM_CTX": env.int("OLLAMA_NUM_CTX", default=16384),
 }
 
 # ----------------------------------------------------------------- Logging

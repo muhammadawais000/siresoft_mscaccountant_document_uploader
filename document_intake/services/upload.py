@@ -18,7 +18,7 @@ from PIL import Image, UnidentifiedImageError
 
 from document_intake.conf import intake_settings
 from document_intake.exceptions import UploadRejected
-from document_intake.models import AuditAction, DocType, Document
+from document_intake.models import AuditAction, DocType, Document, DocumentStatus
 
 from . import audit
 
@@ -149,8 +149,9 @@ def create_document(
 ) -> Document:
     """Validate and store an upload, write the audit entry, and queue extraction.
 
-    Exact duplicates (same SHA-256 for the same owner) are accepted but flagged via
-    ``duplicate_of`` so a reviewer decides; nothing is silently dropped.
+    Exact duplicates (same SHA-256 for the same owner) are kept and linked via
+    ``duplicate_of``. With SKIP_EXTRACTION_FOR_DUPLICATES (default) they go straight to
+    status ``duplicate`` and are not sent to the model.
     """
     validated = validate_upload(upload)
     duplicate = find_duplicate(
@@ -168,6 +169,9 @@ def create_document(
         doc_type=doc_type,
         duplicate_of=duplicate,
     )
+    skip_extraction = duplicate is not None and intake_settings.SKIP_EXTRACTION_FOR_DUPLICATES
+    if skip_extraction:
+        document.status = DocumentStatus.DUPLICATE
     # The storage name is built from the document id (see document_upload_to).
     document.file.save(validated.original_filename, upload, save=False)
     try:
@@ -181,7 +185,8 @@ def create_document(
                 mime_type=validated.mime_type,
                 duplicate_of=str(duplicate.id) if duplicate else None,
             )
-            transaction.on_commit(lambda: _enqueue_extraction(document.id))
+            if not skip_extraction:
+                transaction.on_commit(lambda: _enqueue_extraction(document.id))
     except Exception:
         # Do not leave an orphaned file behind if the database write failed.
         document.file.delete(save=False)

@@ -29,9 +29,21 @@ DEFAULTS: dict[str, Any] = {
     "OLLAMA_VISION_MODEL": "",
     "OLLAMA_TEXT_MODEL": "",
     "OLLAMA_TIMEOUT_SECONDS": 180,
+    # Context window requested from Ollama. Its own default is small and would silently
+    # cut long statements, so we always set it explicitly.
+    "OLLAMA_NUM_CTX": 16384,
+    # In-call retries for transport errors / malformed JSON before the task-level retry.
     "OLLAMA_MAX_RETRIES": 2,
+    "OLLAMA_RETRY_BACKOFF_SECONDS": 2.0,
+    # Celery task retries for provider outages, with exponential backoff.
+    "TASK_MAX_RETRIES": 3,
+    "TASK_RETRY_BACKOFF_SECONDS": 30,
+    # Size guards. Documents beyond these fail clearly instead of being silently truncated.
     "MAX_PAGES": 20,
+    "MAX_VISION_PAGES": 4,
+    "MAX_TEXT_CHARS": 48_000,
     "RENDER_DPI": 150,
+    "MAX_IMAGE_EDGE_PX": 2000,
     # A PDF page counts as having a usable text layer above this many characters.
     "MIN_TEXT_CHARS_PER_PAGE": 40,
     "DEFAULT_CURRENCY": "CAD",
@@ -46,6 +58,8 @@ DEFAULTS: dict[str, Any] = {
     # Feature flags
     "FEATURE_AUTO_CLASSIFY": True,
     "FEATURE_DUPLICATE_DETECTION": True,
+    # Exact duplicates go straight to status "duplicate" and are not sent to the model.
+    "SKIP_EXTRACTION_FOR_DUPLICATES": True,
 }
 
 
