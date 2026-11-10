@@ -91,6 +91,24 @@ def test_review_page_for_own_document(ui_client, user) -> None:
     assert b"&lt;b&gt;td&lt;/b&gt;.pdf" in response.content  # auto-escaped
 
 
+def test_review_page_config(ui_client, user) -> None:
+    doc = DocumentFactory(uploaded_by=user)
+    response = ui_client.get(reverse("document_intake:document-review", args=[doc.pk]))
+    match = re.search(
+        rb'<script id="review-config" type="application/json">(.*?)</script>', response.content
+    )
+    cfg = json.loads(match.group(1))
+    assert cfg["documentId"] == str(doc.pk)
+    assert "closing_balance" in cfg["amountKeys"]
+    assert "invoice_date" in cfg["dateKeys"]
+    assert cfg["reviewerKeys"] == ["account", "posting_date"]
+    assert cfg["methods"]["pdf_text"] == "PDF text layer"
+    html = response.content.decode()
+    assert "document_intake/css/review.css" in html
+    assert 'role="tablist"' in html
+    assert 'data-action="approve" disabled' in html
+
+
 def test_review_page_for_other_users_document_is_404(ui_client, other_user) -> None:
     doc = DocumentFactory(uploaded_by=other_user)
     response = ui_client.get(reverse("document_intake:document-review", args=[doc.pk]))
@@ -111,6 +129,11 @@ def test_review_page_for_other_users_document_is_404(ui_client, other_user) -> N
         "document_intake/js/table.js",
         "document_intake/js/toast.js",
         "document_intake/js/upload.js",
+        "document_intake/js/review.js",
+        "document_intake/js/preview.js",
+        "document_intake/js/dialog.js",
+        "document_intake/js/totals.js",
+        "document_intake/css/review.css",
     ],
 )
 def test_static_assets_exist(path) -> None:

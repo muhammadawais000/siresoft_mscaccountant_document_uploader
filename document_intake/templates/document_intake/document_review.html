@@ -1,6 +1,112 @@
 {% extends "document_intake/base.html" %}
-{% block title %}Review{% endblock %}
-{% block page_title %}<span class="topbar__crumb">Documents /</span> {{ document.original_filename }}{% endblock %}
+{% load static %}
+{% block title %}Review {{ document.original_filename }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'document_intake/css/review.css' %}">{% endblock %}
+{% block page_title %}<a class="topbar__crumb" href="{% url 'document_intake:document-list' %}">Documents</a> <span class="topbar__crumb" aria-hidden="true">/</span> <span data-filename>{{ document.original_filename }}</span>{% endblock %}
+
+{% block actions %}
+  <button class="btn" type="button" data-action="save" disabled>Save changes</button>
+  <details class="menu">
+    <summary class="btn" aria-haspopup="menu">More</summary>
+    <div class="menu__list" role="menu">
+      <button class="menu__item" type="button" role="menuitem" data-action="clarify">Ask client a question</button>
+      <button class="menu__item" type="button" role="menuitem" data-action="resume" hidden>Resume review</button>
+      <button class="menu__item" type="button" role="menuitem" data-action="duplicate">Mark as duplicate</button>
+      <button class="menu__item" type="button" role="menuitem" data-action="reprocess">Reprocess</button>
+    </div>
+  </details>
+  <a class="btn" data-action="export" href="#" download aria-disabled="true">Export CSV</a>
+  <button class="btn btn--danger" type="button" data-action="reject">Reject</button>
+  <button class="btn btn--primary" type="button" data-action="approve" disabled>Approve</button>
+{% endblock %}
+
+{% block main_class %}content--wide{% endblock %}
 {% block content %}
-<div class="panel"><div class="panel__body">The review screen is built in delivery step 8.</div></div>
+<div class="statusbar">
+  <span class="badge" data-status-badge>{{ document.get_status_display }}</span>
+  <span class="statusbar__meta" data-meta></span>
+  <span class="statusbar__save" data-save-state aria-live="polite"></span>
+</div>
+
+<div class="tabs" role="tablist" aria-label="Document views">
+  <button class="tabs__tab" type="button" role="tab" id="tab-review" aria-selected="true"
+          aria-controls="panel-review" data-tab="review">Review</button>
+  <button class="tabs__tab" type="button" role="tab" id="tab-activity" aria-selected="false"
+          aria-controls="panel-activity" data-tab="activity" tabindex="-1">Activity</button>
+</div>
+
+<div data-notices class="stack"></div>
+
+<div id="panel-review" role="tabpanel" aria-labelledby="tab-review">
+  <div class="review">
+    <section class="panel viewer" data-viewer aria-label="Document preview" tabindex="0">
+      <div class="viewer__toolbar">
+        <button class="btn btn--sm" type="button" data-page-prev aria-label="Previous page">‹</button>
+        <span data-page-label aria-live="polite">Page 1</span>
+        <button class="btn btn--sm" type="button" data-page-next aria-label="Next page">›</button>
+        <span class="viewer__spacer"></span>
+        <button class="btn btn--sm" type="button" data-zoom-out aria-label="Zoom out">−</button>
+        <span class="viewer__zoom" data-zoom-label>100%</span>
+        <button class="btn btn--sm" type="button" data-zoom-in aria-label="Zoom in">+</button>
+        <button class="btn btn--sm" type="button" data-zoom-fit>Fit</button>
+        <a class="btn btn--sm btn--ghost" href="{{ file_url }}" target="_blank" rel="noopener">Original</a>
+      </div>
+      <div class="viewer__stage" data-stage>
+        <span class="skeleton viewer__loading"></span>
+      </div>
+    </section>
+
+    <div class="review__side" data-side aria-busy="true">
+      <section class="panel" aria-labelledby="fields-title">
+        <div class="panel__header"><h2 class="panel__title" id="fields-title">Details</h2></div>
+        <div class="panel__body"><div class="fields" data-fields>
+          <span class="skeleton skeleton--w80"></span><span class="skeleton skeleton--w60"></span>
+        </div></div>
+      </section>
+
+      <section class="panel lines" data-lines-panel aria-labelledby="lines-title">
+        <div class="panel__header">
+          <h2 class="panel__title" id="lines-title" data-lines-title>Lines</h2>
+          <button class="btn btn--sm" type="button" data-add-line hidden>Add row</button>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" data-lines>
+            <thead></thead><tbody></tbody><tfoot></tfoot>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="totals-title">
+        <div class="panel__header">
+          <h2 class="panel__title" id="totals-title">Totals check</h2>
+          <span class="field__hint">Updates as you type</span>
+        </div>
+        <div data-totals></div>
+      </section>
+
+      <section class="panel" aria-labelledby="issues-title">
+        <div class="panel__header">
+          <h2 class="panel__title" id="issues-title">Validation</h2>
+          <span class="field__hint" data-issues-summary aria-live="polite"></span>
+        </div>
+        <ul class="issues" data-issues></ul>
+        <label class="ack" data-ack hidden>
+          <input type="checkbox" data-ack-box>
+          <span data-ack-text></span>
+        </label>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div id="panel-activity" role="tabpanel" aria-labelledby="tab-activity" hidden>
+  <section class="panel" aria-label="Activity">
+    <ul class="activity" data-activity></ul>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ page_config|json_script:"review-config" }}
+<script type="module" src="{% static 'document_intake/js/review.js' %}"></script>
 {% endblock %}

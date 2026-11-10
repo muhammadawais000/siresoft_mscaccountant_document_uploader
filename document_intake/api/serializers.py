@@ -7,6 +7,7 @@ from typing import Any
 from rest_framework import serializers
 
 from document_intake.models import (
+    AuditLog,
     DocType,
     Document,
     DocumentStatus,
@@ -176,6 +177,26 @@ class ExtractionResultSerializer(serializers.ModelSerializer[ExtractionResult]):
             "issues",
         )
         read_only_fields = fields
+
+
+class AuditEntrySerializer(serializers.ModelSerializer[AuditLog]):
+    actor = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AuditLog
+        fields = ("id", "timestamp", "action", "actor", "metadata")
+        read_only_fields = fields
+
+    def get_actor(self, obj: AuditLog) -> str:
+        """Display name; "System" for worker actions."""
+        if obj.actor is None:
+            return "System"
+        full_name = str(getattr(obj.actor, "get_full_name", lambda: "")())
+        return full_name or str(obj.actor.get_username())
+
+
+class PagesSerializer(serializers.Serializer[None]):
+    count = serializers.IntegerField()
 
 
 # ---------------------------------------------------------------- edit inputs

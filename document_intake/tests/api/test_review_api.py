@@ -365,3 +365,53 @@ def test_export_neutralises_formula_injection(auth_client, user) -> None:
     auth_client.post(url("approve", doc), {}, format="json")
     rows = read_csv(auth_client.get(url("export-csv", doc)))
     assert rows[1][1].startswith("'=")
+
+
+# ------------------------------------------------------------- preview / activity
+
+
+def test_pages_and_page_image(auth_client, user) -> None:
+    doc = extracted(user)
+    assert auth_client.get(url("pages", doc)).json() == {"count": 1}
+    response = auth_client.get(url("page", doc, page_number="1"), {"dpi": "9999"})
+    assert response.status_code == 200
+    assert response["Content-Type"] == "image/png"
+    assert response.content.startswith(b"\x89PNG")
+    assert response["Cache-Control"] == "private, no-store"
+    assert auth_client.get(url("page", doc, page_number="2")).status_code == 404
+
+
+def test_page_image_for_photo(auth_client, user) -> None:
+    from document_intake.tests.conftest import make_image
+
+    doc = DocumentFactory(
+        uploaded_by=user,
+        content=make_image("JPEG"),
+        mime_type="image/jpeg",
+        original_filename="r.jpg",
+    )
+    assert auth_client.get(url("pages", doc)).json() == {"count": 1}
+    assert auth_client.get(url("page", doc, page_number="1")).content.startswith(b"\x89PNG")
+    assert auth_client.get(url("page", doc, page_number="2")).status_code == 404
+
+
+def test_page_image_of_other_users_document_is_404(auth_client, other_user) -> None:
+    doc = extracted(other_user)
+    assert auth_client.get(url("page", doc, page_number="1")).status_code == 404
+    assert auth_client.get(url("pages", doc)).status_code == 404
+
+
+def test_activity(auth_client, user) -> None:
+    doc = extracted(user)
+    auth_client.patch(
+        url("field", doc, field_id=field_id(doc, "currency")), {"value": "USD"}, format="json"
+    )
+    entries = auth_client.get(url("activity", doc)).json()
+    assert entries[0]["action"] == "edit"
+    assert entries[0]["actor"] == user.username
+    assert entries[0]["metadata"]["after"] == "USD"
+    assert {"System"} <= {e["actor"] for e in entries}
+
+
+def test_activity_of_other_users_document_is_404(auth_client, other_user) -> None:
+    assert auth_client.get(url("activity", extracted(other_user))).status_code == 404

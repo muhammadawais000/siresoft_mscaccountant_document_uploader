@@ -44,7 +44,7 @@
         <h1 class="topbar__title">{% block page_title %}{% endblock %}</h1>
         <div class="topbar__actions">{% block actions %}{% endblock %}</div>
       </header>
-      <main id="main" class="content" tabindex="-1">
+      <main id="main" class="content {% block main_class %}{% endblock %}" tabindex="-1">
         {% block content %}{% endblock %}
       </main>
     </div>

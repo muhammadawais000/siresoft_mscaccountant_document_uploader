@@ -113,3 +113,47 @@ def load_image(data: bytes) -> list[bytes]:
             return [_to_png(image)]
     except (OSError, Image.DecompressionBombError) as exc:
         raise ExtractionError("The image cannot be read.") from exc
+
+
+def page_count(data: bytes, mime_type: str) -> int:
+    """Number of viewable pages (images have one)."""
+    if mime_type != "application/pdf":
+        return 1
+    try:
+        pdf = pdfium.PdfDocument(data)
+    except pdfium.PdfiumError as exc:
+        raise ExtractionError("The PDF is encrypted or cannot be read.") from exc
+    try:
+        return len(pdf)
+    finally:
+        pdf.close()
+
+
+def render_preview(data: bytes, mime_type: str, page_number: int, dpi: int) -> bytes:
+    """One page as PNG for the review screen's viewer (1-based ``page_number``).
+
+    Raises:
+        IndexError: page out of range.
+        ExtractionError: unreadable file.
+    """
+    if mime_type != "application/pdf":
+        if page_number != 1:
+            raise IndexError(page_number)
+        return load_image(data)[0]
+    try:
+        pdf = pdfium.PdfDocument(data)
+    except pdfium.PdfiumError as exc:
+        raise ExtractionError("The PDF is encrypted or cannot be read.") from exc
+    try:
+        if not 1 <= page_number <= len(pdf):
+            raise IndexError(page_number)
+        page = pdf[page_number - 1]
+        try:
+            image = page.render(scale=dpi / 72).to_pil()
+        finally:
+            page.close()
+    finally:
+        pdf.close()
+    out = io.BytesIO()
+    (image if image.mode in ("RGB", "L") else image.convert("RGB")).save(out, format="PNG")
+    return out.getvalue()

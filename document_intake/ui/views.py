@@ -11,7 +11,8 @@ from django.views.generic import TemplateView
 from rest_framework.settings import api_settings
 
 from document_intake.conf import intake_settings
-from document_intake.models import DocType, DocumentStatus
+from document_intake.extraction.schemas import AMOUNT_KEYS, DATE_KEYS, REVIEWER_KEYS
+from document_intake.models import DocType, DocumentStatus, ExtractionMethod
 from document_intake.services import access
 
 PLACEHOLDER_ID = "00000000-0000-0000-0000-000000000000"
@@ -82,5 +83,22 @@ class DocumentReviewView(IntakePageMixin, TemplateView):
         document = access.visible_documents(self.request.user).filter(pk=kwargs["pk"]).first()
         if document is None:
             raise Http404("Document not found.")
-        context["document"] = document
+        context.update(
+            document=document,
+            file_url=reverse("document_intake_api:document-file", args=[document.pk]),
+            page_config={
+                "documentId": str(document.pk),
+                "listUrl": reverse("document_intake:document-list"),
+                "reviewUrlTemplate": reverse(
+                    "document_intake:document-review", args=[PLACEHOLDER_ID]
+                ),
+                "statuses": dict(DocumentStatus.choices),
+                "docTypes": dict(DocType.choices),
+                "methods": dict(ExtractionMethod.choices),
+                "amountKeys": sorted(AMOUNT_KEYS),
+                "dateKeys": sorted(DATE_KEYS),
+                "reviewerKeys": sorted(REVIEWER_KEYS),
+                "pollMs": 4000,
+            },
+        )
         return context

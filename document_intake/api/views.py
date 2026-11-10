@@ -24,6 +24,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import BaseThrottle
 from rest_framework.views import APIView
 
+from document_intake.extraction import sources
 from document_intake.models import (
     AuditAction,
     Document,
@@ -35,6 +36,7 @@ from document_intake.services import access, audit, export, lifecycle, query, re
 from .permissions import configured_permission_classes, configured_review_permission_classes
 from .serializers import (
     ApproveSerializer,
+    AuditEntrySerializer,
     ClarifySerializer,
     DocumentFilterSerializer,
     DocumentSerializer,
@@ -44,6 +46,7 @@ from .serializers import (
     IssueResolveSerializer,
     LineEditSerializer,
     MarkDuplicateSerializer,
+    PagesSerializer,
     RejectSerializer,
 )
 from .throttles import UploadRateThrottle
@@ -301,6 +304,59 @@ class DocumentViewSet(
                 raise NotFound("The original document was not found.")
         document = lifecycle.mark_duplicate(self.get_object(), request.user, of=original)
         return self._document_response(document)
+
+    # ------------------------------------------------------------ preview / activity
+
+    def _file_bytes(self, document: Document) -> bytes:
+        with document.file.open("rb") as fp:
+            data: bytes = fp.read()
+        return data
+
+    @extend_schema(responses=PagesSerializer)
+    @action(detail=True, methods=["get"])
+    def pages(self, request: Request, pk: str | None = None) -> Response:
+        """How many pages the viewer can show."""
+        document = self.get_object()
+        count = document.page_count or sources.page_count(
+            self._file_bytes(document), document.mime_type
+        )
+        return Response({"count": count})
+
+    @extend_schema(
+        operation_id="documents_page_image",
+        parameters=[OpenApiParameter("dpi", int, description="72-200, default 110.")],
+        responses={(200, "image/png"): OpenApiTypes.BINARY},
+    )
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path=r"pages/(?P<page_number>[0-9]{1,4})",
+        url_name="page",
+    )
+    def page(self, request: Request, pk: str | None = None, page_number: str = "1") -> HttpResponse:
+        """One page rendered to PNG for the review screen (PDFs and images alike)."""
+        document = self.get_object()
+        try:
+            dpi = min(200, max(72, int(request.query_params.get("dpi", "110"))))
+        except ValueError:
+            dpi = 110
+        try:
+            png = sources.render_preview(
+                self._file_bytes(document), document.mime_type, int(page_number), dpi
+            )
+        except IndexError as exc:
+            raise NotFound("No such page.") from exc
+        response = HttpResponse(png, content_type="image/png")
+        response["Cache-Control"] = "private, no-store"
+        return response
+
+    @extend_schema(responses=AuditEntrySerializer(many=True))
+    @action(detail=True, methods=["get"])
+    def activity(self, request: Request, pk: str | None = None) -> Response:
+        """The document's audit trail, newest first (latest 200 entries)."""
+        document = self.get_object()
+        entries = document.audit_entries.select_related("actor").order_by("-timestamp")[:200]
+        return Response(AuditEntrySerializer(entries, many=True).data)
 
     # ------------------------------------------------------------ files / export
 
