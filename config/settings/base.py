@@ -92,10 +92,9 @@ STORAGES: dict[str, dict[str, Any]] = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
     "intake_private": {
-        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "BACKEND": "document_intake.storage.PrivateFileSystemStorage",
         "OPTIONS": {
             "location": env.path("INTAKE_PRIVATE_STORAGE_ROOT", default=BASE_DIR / "private_media"),
-            "base_url": None,
             "file_permissions_mode": 0o640,
             "directory_permissions_mode": 0o750,
         },

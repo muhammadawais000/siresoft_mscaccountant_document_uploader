@@ -45,6 +45,7 @@ package = false
 target-version = "py312"
 line-length = 100
 extend-exclude = ["**/migrations/*"]
+force-exclude = true  # honour excludes even when pre-commit passes filenames
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "S", "DJ", "SIM", "RUF", "N", "C4", "PT", "RET"]
