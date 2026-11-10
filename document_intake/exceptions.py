@@ -45,3 +45,9 @@ class DocumentTooLarge(IntakeError):
     """The document has more pages than MAX_PAGES."""
 
     code = "document_too_large"
+
+
+class ApprovalBlocked(IntakeError):
+    """Approval refused: unresolved errors and the reviewer did not acknowledge them."""
+
+    code = "approval_blocked"

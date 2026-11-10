@@ -17,7 +17,7 @@ from django.db import transaction
 from django.db.models import Max
 
 from document_intake.conf import intake_settings
-from document_intake.exceptions import DocumentTooLarge, ExtractionError
+from document_intake.exceptions import DocumentTooLarge, ExtractionError, InvalidTransition
 from document_intake.extraction import parsing, prompts, schemas, sources
 from document_intake.models import (
     AuditAction,
@@ -32,7 +32,7 @@ from document_intake.models import (
 from document_intake.providers.base import ExtractionProvider, ModelRequest, get_provider
 from document_intake.signals import document_extracted
 
-from . import audit
+from . import audit, lifecycle, validation
 
 logger = logging.getLogger(__name__)
 
@@ -103,10 +103,9 @@ def _start(document_id: uuid.UUID | str) -> Document | None:
                 extra={"document_id": str(document.id), "status": document.status},
             )
             return None
-        document.status = DocumentStatus.PROCESSING
-        document.error_message = ""
-        document.save(update_fields=["status", "error_message", "updated_at"])
-    return document
+        if document.status == DocumentStatus.PROCESSING:
+            return document  # resuming after a worker crash or a retry
+        return lifecycle.transition(document, DocumentStatus.PROCESSING, error_message="")
 
 
 def run_extraction(
@@ -182,10 +181,8 @@ def _store(
                 key=row.key,
                 label=row.label,
                 position=row.position,
-                value=row.value,
-                normalized_value=row.normalized_value,
-                status=row.status,
-                status_reason=row.status_reason,
+                value=row.value.value,
+                normalized_value=row.value.normalized_value,
             )
             for row in field_rows
         )
@@ -200,8 +197,6 @@ def _store(
                 amount=row.amount,
                 balance=row.balance,
                 tax=row.tax,
-                status=row.status,
-                status_reason=row.status_reason,
                 raw=row.raw,
             )
             for row in line_rows
@@ -211,16 +206,10 @@ def _store(
         document.page_count = prepared.page_count
         if detected:
             document.detected_doc_type = detected
-        document.status = DocumentStatus.NEEDS_REVIEW
         document.save(
-            update_fields=[
-                "extraction_method",
-                "page_count",
-                "detected_doc_type",
-                "status",
-                "updated_at",
-            ]
+            update_fields=["extraction_method", "page_count", "detected_doc_type", "updated_at"]
         )
+        issues = validation.validate_result(result)
         audit.record(
             AuditAction.EXTRACT,
             document,
@@ -233,7 +222,11 @@ def _store(
             duration_ms=duration_ms,
             fields=len(field_rows),
             lines=len(line_rows),
+            issues=len(issues),
         )
+        # Never auto-approved: a person reviews every extraction.
+        document = lifecycle.transition(document, DocumentStatus.NEEDS_REVIEW)
+        result.document = document
         transaction.on_commit(
             lambda: document_extracted.send(sender=Document, document=document, result=result)
         )
@@ -252,10 +245,18 @@ def _store(
 
 def mark_failed(document_id: uuid.UUID | str, reason: str) -> None:
     """Dead-letter state: the document needs an operator (fix config, then reprocess)."""
-    with transaction.atomic():
-        document = Document.objects.select_for_update().get(pk=document_id)
-        document.status = DocumentStatus.FAILED
-        document.error_message = reason[:500]
-        document.save(update_fields=["status", "error_message", "updated_at"])
-        audit.record(AuditAction.EXTRACT, document, None, outcome="failed", reason=reason[:500])
+    document = Document.objects.get(pk=document_id)
+    try:
+        with transaction.atomic():
+            lifecycle.transition(
+                document, DocumentStatus.FAILED, error_message=reason, reason=reason[:500]
+            )
+            audit.record(AuditAction.EXTRACT, document, None, outcome="failed")
+    except InvalidTransition:
+        # Someone already moved it on (e.g. rejected while we worked); keep their decision.
+        logger.warning(
+            "could not mark failed",
+            extra={"document_id": str(document_id), "status": document.status},
+        )
+        return
     logger.warning("extraction failed", extra={"document_id": str(document_id)})

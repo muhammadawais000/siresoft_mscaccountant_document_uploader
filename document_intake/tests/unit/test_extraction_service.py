@@ -166,8 +166,19 @@ def test_mark_failed() -> None:
     doc.refresh_from_db()
     assert doc.status == DocumentStatus.FAILED
     assert doc.error_message == "Ollama timed out."
-    entry = AuditLog.objects.get(document=doc)
-    assert entry.metadata == {"outcome": "failed", "reason": "Ollama timed out."}
+    change = AuditLog.objects.get(document=doc, action=AuditAction.STATUS_CHANGE)
+    assert change.metadata["to"] == DocumentStatus.FAILED
+    assert change.metadata["reason"] == "Ollama timed out."
+    assert AuditLog.objects.get(document=doc, action=AuditAction.EXTRACT).metadata == {
+        "outcome": "failed"
+    }
+
+
+def test_mark_failed_keeps_a_human_decision() -> None:
+    doc = text_pdf_document(status=DocumentStatus.REJECTED)
+    mark_failed(doc.id, "late failure")
+    doc.refresh_from_db()
+    assert doc.status == DocumentStatus.REJECTED
 
 
 # -------------------------------------------------------------------- task

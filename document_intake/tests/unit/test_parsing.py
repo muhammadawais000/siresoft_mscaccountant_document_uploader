@@ -9,11 +9,13 @@ from document_intake.extraction.parsing import (
     ParseError,
     build_fields,
     build_lines,
+    parse_header,
     parse_iso_date,
     parse_money,
 )
-from document_intake.models import DocType, FieldStatus
+from document_intake.models import DocType
 from document_intake.tests.fakes import BANK_STATEMENT, RECEIPT
+from document_intake.validators.types import Sev
 
 
 @pytest.mark.parametrize(
@@ -83,43 +85,58 @@ def test_parse_date_rejects(raw) -> None:
 
 
 def _by_key(rows):
-    return {row.key: row for row in rows}
+    return {row.key: row.value for row in rows}
 
 
 def test_receipt_fields() -> None:
-    rows = _by_key(build_fields(DocType.RECEIPT, RECEIPT, "CAD"))
-    assert rows["vendor_name"].status == FieldStatus.OK
-    assert rows["total"].normalized_value == "113.00"
-    assert rows["invoice_date"].normalized_value == "2026-09-03"
-    assert rows["invoice_number"].status == FieldStatus.MISSING
-    assert rows["currency"].status == FieldStatus.WARNING
-    assert rows["currency"].normalized_value == "CAD"
-    assert next(r.key for r in build_fields(DocType.RECEIPT, RECEIPT, "CAD")) == "vendor_name"
+    rows = build_fields(DocType.RECEIPT, RECEIPT, "CAD")
+    values = _by_key(rows)
+    assert rows[0].key == "vendor_name"
+    assert values["vendor_name"].parsed == "Hardware Store"
+    assert values["total"].normalized_value == "113.00"
+    assert values["total"].parsed == Decimal("113.00")
+    assert values["invoice_date"].parsed == date(2026, 9, 3)
+    assert values["invoice_number"].value == ""
+    assert values["currency"].normalized_value == "CAD"
+    assert "assumed CAD" in values["currency"].warning
+    # Reviewer-only fields exist but start blank.
+    assert values["posting_date"].value == ""
+    assert values["account"].value == ""
 
 
 def test_unreadable_values_kept_verbatim_and_flagged() -> None:
     data = {**RECEIPT, "total": ">$113.00", "invoice_date": "03/09/2026", "currency": "dollars"}
-    rows = _by_key(build_fields(DocType.RECEIPT, data, "CAD"))
-    assert rows["total"].status == FieldStatus.ERROR
-    assert rows["total"].value == ">$113.00"
-    assert rows["total"].normalized_value == ""
-    assert rows["invoice_date"].status == FieldStatus.ERROR
-    assert rows["currency"].status == FieldStatus.ERROR
+    values = _by_key(build_fields(DocType.RECEIPT, data, "CAD"))
+    assert values["total"].value == ">$113.00"
+    assert values["total"].parsed is None
+    assert values["total"].normalized_value == ""
+    assert values["total"].problem == "unreadable amount"
+    assert values["invoice_date"].problem
+    assert values["currency"].problem
 
 
 @pytest.mark.parametrize(
-    ("raw", "value", "status"),
+    ("raw", "value", "problem", "warning"),
     [
-        ("1234", "1234", FieldStatus.OK),
-        ("****1234", "1234", FieldStatus.OK),
-        ("12345678901234", "1234", FieldStatus.WARNING),
-        ("12", "12", FieldStatus.ERROR),
+        ("1234", "1234", False, False),
+        ("****1234", "1234", False, False),
+        ("12345678901234", "1234", False, True),
+        ("12", "12", True, False),
     ],
 )
-def test_account_number_is_masked(raw, value, status) -> None:
-    rows = _by_key(build_fields(DocType.BANK_STATEMENT, {"account_last4": raw}, "CAD"))
-    assert rows["account_last4"].value == value
-    assert rows["account_last4"].status == status
+def test_account_number_is_masked(raw, value, problem, warning) -> None:
+    parsed = parse_header("account_last4", raw, "CAD")
+    assert parsed.value == value
+    assert bool(parsed.problem) is problem
+    assert bool(parsed.warning) is warning
+    assert "5678" not in parsed.value
+
+
+def test_header_as_input() -> None:
+    item = parse_header("total", "12.00", "CAD").as_input("total")
+    assert item.key == "total"
+    assert item.parsed == Decimal("12.00")
+    assert not item.is_blank
 
 
 def test_statement_lines() -> None:
@@ -130,7 +147,11 @@ def test_statement_lines() -> None:
     assert rent.amount == Decimal("-1500.00")
     assert payment.amount == Decimal("700.00")
     assert rent.date == date(2026, 9, 3)
-    assert rent.status == FieldStatus.OK
+    assert rent.problems == []
+
+
+def messages(line) -> list[str]:
+    return [message for _, message in line.problems]
 
 
 def test_statement_line_problems() -> None:
@@ -151,16 +172,24 @@ def test_statement_line_problems() -> None:
                 "credit": "5.00",
                 "balance": None,
             },
+            {"date": "Sept 1", "description": "x", "debit": "??", "credit": None, "balance": None},
         ]
     }
-    missing, negative, both = build_lines(DocType.BANK_STATEMENT, data)
-    assert missing.status == FieldStatus.MISSING
-    assert "no debit or credit" in missing.status_reason
-    assert negative.status == FieldStatus.ERROR
+    missing, negative, both, unreadable = build_lines(DocType.BANK_STATEMENT, data)
+    assert messages(missing) == [
+        "Date is missing.",
+        "No debit or credit amount.",
+        "Description is missing.",
+    ]
+    assert (Sev.ERROR, "No debit or credit amount.") in missing.problems
     assert negative.debit is None  # never stored: it would violate the non-negative rule
     assert negative.balance is None
-    assert both.status == FieldStatus.WARNING
+    assert "Debit: negative value." in messages(negative)
+    assert "Balance: unreadable amount." in messages(negative)
+    assert messages(both) == ["Both debit and credit are filled in."]
     assert both.amount == Decimal("0.00")
+    # Unreadable values are reported once, not also as "missing".
+    assert messages(unreadable) == ["Date: date is not YYYY-MM-DD.", "Debit: unreadable amount."]
 
 
 def test_zero_in_other_column_is_not_a_conflict() -> None:
@@ -176,7 +205,7 @@ def test_zero_in_other_column_is_not_a_conflict() -> None:
         ]
     }
     (line,) = build_lines(DocType.BANK_STATEMENT, data)
-    assert line.status == FieldStatus.OK
+    assert line.problems == []
     assert line.amount == Decimal("700.00")
 
 
@@ -184,8 +213,20 @@ def test_receipt_lines() -> None:
     lines = build_lines(DocType.RECEIPT, RECEIPT)
     assert [line.amount for line in lines] == [Decimal("50.00"), Decimal("50.00")]
     assert lines[0].raw["quantity"] == "2"
-    bad = build_lines(DocType.INVOICE, {"line_items": [{"description": "", "amount": None}]})
-    assert bad[0].status == FieldStatus.MISSING
+    (bad,) = build_lines(DocType.INVOICE, {"line_items": [{"description": "", "amount": None}]})
+    assert messages(bad) == ["Amount is missing.", "Description is missing."]
+    (unreadable,) = build_lines(
+        DocType.INVOICE, {"line_items": [{"description": "a", "amount": "x"}]}
+    )
+    assert messages(unreadable) == ["Amount: unreadable amount."]
+
+
+def test_line_as_input() -> None:
+    (line,) = build_lines(DocType.RECEIPT, {"line_items": [{"description": "a", "amount": "1"}]})
+    item = line.as_input()
+    assert item.line_no == 1
+    assert item.amount == Decimal("1.00")
+    assert item.problems == ()
 
 
 def test_no_lines_when_model_returns_none() -> None:

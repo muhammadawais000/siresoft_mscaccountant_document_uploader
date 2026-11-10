@@ -16,6 +16,7 @@ from document_intake import exceptions as intake_exc
 _STATUS_FOR: dict[type[intake_exc.IntakeError], int] = {
     intake_exc.UploadRejected: status.HTTP_400_BAD_REQUEST,
     intake_exc.InvalidTransition: status.HTTP_409_CONFLICT,
+    intake_exc.ApprovalBlocked: status.HTTP_409_CONFLICT,
     intake_exc.DocumentTooLarge: status.HTTP_400_BAD_REQUEST,
 }
 

@@ -129,6 +129,9 @@ HEADER_FIELDS: dict[str, list[tuple[str, str]]] = {
         ("payment_method", "Payment method"),
         ("customer_job", "Customer / job"),
         ("description", "Description"),
+        # Entered by the reviewer; never asked of the model (not printed on documents).
+        ("posting_date", "Posting date"),
+        ("account", "Account (head of account)"),
     ],
     "statement": [
         ("institution_name", "Institution"),
@@ -146,8 +149,10 @@ AMOUNT_KEYS = frozenset(
     {"subtotal", "gst", "hst", "pst", "total", "opening_balance", "closing_balance"}
 )
 DATE_KEYS = frozenset(
-    {"invoice_date", "due_date", "statement_period_start", "statement_period_end"}
+    {"invoice_date", "due_date", "posting_date", "statement_period_start", "statement_period_end"}
 )
+# Fields the reviewer fills in; blank is their normal starting state, not "missing".
+REVIEWER_KEYS = frozenset({"posting_date", "account"})
 
 
 def family(doc_type: str) -> str:
