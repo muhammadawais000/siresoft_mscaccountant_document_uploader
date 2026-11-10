@@ -26,3 +26,8 @@ class IsOwnerOrStaff(BasePermission):
 def configured_permission_classes() -> list[type[BasePermission]]:
     """Permission classes named in ``DOCUMENT_INTAKE["PERMISSION_CLASSES"]``."""
     return [import_string(path) for path in intake_settings.PERMISSION_CLASSES]
+
+
+def configured_review_permission_classes() -> list[type[BasePermission]]:
+    """Extra classes for edit / approve / reject / export (``REVIEW_PERMISSION_CLASSES``)."""
+    return [import_string(path) for path in intake_settings.REVIEW_PERMISSION_CLASSES]

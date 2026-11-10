@@ -122,6 +122,13 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "SERVE_PERMISSIONS": ["rest_framework.permissions.IsAuthenticated"],
+    "ENUM_NAME_OVERRIDES": {
+        "DocTypeEnum": "document_intake.models.choices.DocType",
+        "DocumentStatusEnum": "document_intake.models.choices.DocumentStatus",
+        "FieldStatusEnum": "document_intake.models.choices.FieldStatus",
+        "SeverityEnum": "document_intake.models.choices.Severity",
+        "ExtractionMethodEnum": "document_intake.models.choices.ExtractionMethod",
+    },
 }
 
 # ------------------------------------------------------------------ Celery

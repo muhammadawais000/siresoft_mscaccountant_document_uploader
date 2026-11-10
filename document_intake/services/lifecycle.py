@@ -168,7 +168,7 @@ def mark_duplicate(document: Document, actor: Any, *, of: Document | None = None
 
 
 def mark_exported(document: Document, actor: Any) -> Document:
-    return transition(document, S.EXPORTED, actor=actor, action=AuditAction.EXPORT)
+    return transition(document, S.EXPORTED, actor=actor)
 
 
 def queue_reprocess(document: Document, actor: Any) -> Document:

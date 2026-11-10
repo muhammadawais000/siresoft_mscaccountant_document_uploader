@@ -7,7 +7,9 @@ Every error response has the shape::
 
 from typing import Any
 
+from django.core.exceptions import ObjectDoesNotExist
 from rest_framework import status
+from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler
 
@@ -33,6 +35,9 @@ def exception_handler(exc: Exception, context: dict[str, Any]) -> Response | Non
             status=http_status,
         )
 
+    if isinstance(exc, ObjectDoesNotExist):
+        # e.g. a field/line/issue id that is not part of this document's latest result.
+        exc = NotFound()
     response = drf_exception_handler(exc, context)
     if response is None:
         return None

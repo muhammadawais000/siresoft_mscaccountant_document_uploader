@@ -55,6 +55,10 @@ DEFAULTS: dict[str, Any] = {
     # DOCUMENT_SCOPE: function (user, queryset) -> queryset of documents the user may see.
     "PERMISSION_CLASSES": ("document_intake.api.permissions.IsOwnerOrStaff",),
     "DOCUMENT_SCOPE": "document_intake.services.access.default_document_scope",
+    # REVIEW_PERMISSION_CLASSES: added on top for editing, approving, rejecting, exporting.
+    # Standalone default lets the uploader review; a portal sets staff-only classes so
+    # clients can upload but never approve accounting entries.
+    "REVIEW_PERMISSION_CLASSES": ("document_intake.api.permissions.IsOwnerOrStaff",),
     # Feature flags
     "FEATURE_AUTO_CLASSIFY": True,
     "FEATURE_DUPLICATE_DETECTION": True,
