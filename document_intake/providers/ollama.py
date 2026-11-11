@@ -27,7 +27,12 @@ class OllamaProvider(ExtractionProvider):
         self.timeout = float(intake_settings.OLLAMA_TIMEOUT_SECONDS)
         self.max_retries = int(intake_settings.OLLAMA_MAX_RETRIES)
         self.backoff = float(intake_settings.OLLAMA_RETRY_BACKOFF_SECONDS)
-        self._client = client or httpx.Client(base_url=self.base_url, timeout=self.timeout)
+        # A short connect timeout makes an unreachable server fail fast; the long read
+        # timeout leaves room for slow CPU inference.
+        timeout = httpx.Timeout(
+            self.timeout, connect=float(intake_settings.OLLAMA_CONNECT_TIMEOUT_SECONDS)
+        )
+        self._client = client or httpx.Client(base_url=self.base_url, timeout=timeout)
 
     # ------------------------------------------------------------------ public
 
@@ -94,6 +99,9 @@ class OllamaProvider(ExtractionProvider):
     def _post_chat(self, payload: dict[str, Any]) -> str:
         try:
             response = self._client.post("/api/chat", json=payload)
+        except httpx.ConnectTimeout as exc:
+            # No connection at all: point the operator at network / OLLAMA_HOST, not the model.
+            raise ProviderUnavailable(f"Ollama is not reachable at {self.base_url}.") from exc
         except httpx.TimeoutException as exc:
             raise ProviderUnavailable("Ollama timed out.") from exc
         except httpx.TransportError as exc:

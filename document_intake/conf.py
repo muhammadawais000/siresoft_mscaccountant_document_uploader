@@ -29,6 +29,7 @@ DEFAULTS: dict[str, Any] = {
     "OLLAMA_VISION_MODEL": "",
     "OLLAMA_TEXT_MODEL": "",
     "OLLAMA_TIMEOUT_SECONDS": 180,
+    "OLLAMA_CONNECT_TIMEOUT_SECONDS": 10,
     # Context window requested from Ollama. Its own default is small and would silently
     # cut long statements, so we always set it explicitly.
     "OLLAMA_NUM_CTX": 16384,

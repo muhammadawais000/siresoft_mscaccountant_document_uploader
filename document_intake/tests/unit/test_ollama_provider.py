@@ -182,3 +182,18 @@ def test_get_provider_uses_setting() -> None:
     hook = "document_intake.tests.fakes.FakeProvider"
     with override_settings(DOCUMENT_INTAKE={"PROVIDER_CLASS": hook}):
         assert get_provider().name == "fake"
+
+
+def test_default_client_uses_short_connect_timeout() -> None:
+    provider = OllamaProvider()
+    assert provider._client.timeout.connect == 10
+    assert provider._client.timeout.read == 5  # OLLAMA_TIMEOUT_SECONDS in test settings
+
+
+def test_connect_timeout_reports_unreachable() -> None:
+    def hang(r):
+        raise httpx.ConnectTimeout("no route", request=r)
+
+    provider, _ = make_provider(hang)
+    with pytest.raises(ProviderUnavailable, match=r"not reachable at http://ollama\.test"):
+        provider.complete_json(request())

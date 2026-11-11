@@ -146,12 +146,14 @@ def create_document(
     doc_type: str = DocType.AUTO,
     owner_reference: uuid.UUID | None = None,
     request_reference: str = "",
+    enqueue: bool = True,
 ) -> Document:
     """Validate and store an upload, write the audit entry, and queue extraction.
 
     Exact duplicates (same SHA-256 for the same owner) are kept and linked via
     ``duplicate_of``. With SKIP_EXTRACTION_FOR_DUPLICATES (default) they go straight to
-    status ``duplicate`` and are not sent to the model.
+    status ``duplicate`` and are not sent to the model. ``enqueue=False`` lets a caller run
+    extraction itself (e.g. the demo seeder).
     """
     validated = validate_upload(upload)
     duplicate = find_duplicate(
@@ -185,7 +187,7 @@ def create_document(
                 mime_type=validated.mime_type,
                 duplicate_of=str(duplicate.id) if duplicate else None,
             )
-            if not skip_extraction:
+            if enqueue and not skip_extraction:
                 transaction.on_commit(lambda: _enqueue_extraction(document.id))
     except Exception:
         # Do not leave an orphaned file behind if the database write failed.

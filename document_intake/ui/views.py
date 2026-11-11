@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.http import Http404
+from django.http import Http404, HttpRequest
+from django.http.response import HttpResponseBase
 from django.urls import NoReverseMatch, reverse
 from django.views.generic import TemplateView
 from rest_framework.settings import api_settings
@@ -30,8 +31,30 @@ def _logout_url() -> str | None:
         return None
 
 
+# Pages load only our own scripts, styles and images. JSON config blocks
+# (type="application/json") are data, not scripts, so no 'unsafe-inline' is needed.
+CONTENT_SECURITY_POLICY = "; ".join(
+    [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self'",
+        "img-src 'self' data:",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+    ]
+)
+
+
 class IntakePageMixin(LoginRequiredMixin):
     nav_active = "documents"
+
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
+        response: HttpResponseBase = super().dispatch(request, *args, **kwargs)
+        response.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+        return response
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context: dict[str, Any] = super().get_context_data(**kwargs)  # type: ignore[misc]

@@ -182,5 +182,9 @@ LOGGING: dict[str, Any] = {
     "root": {"handlers": ["stdout"], "level": LOG_LEVEL},
     "loggers": {
         "django.db.backends": {"level": "WARNING"},
+        # These log document text at DEBUG; keep them quiet (also enforced in apps.py).
+        "pdfminer": {"level": "WARNING"},
+        "pdfplumber": {"level": "WARNING"},
+        "PIL": {"level": "WARNING"},
     },
 }
