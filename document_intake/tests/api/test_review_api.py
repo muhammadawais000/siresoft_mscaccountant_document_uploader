@@ -23,6 +23,7 @@ from document_intake.tests.unit.test_sources import statement_pdf
 
 pytestmark = pytest.mark.django_db
 S = DocumentStatus
+OWNER_OR_STAFF = ("document_intake.api.permissions.IsOwnerOrStaff",)
 
 
 def url(name, doc, **kwargs):
@@ -91,9 +92,9 @@ def test_list_shows_open_issue_counts(auth_client, user, django_assert_max_num_q
 # ---------------------------------------------------------------------- edits
 
 
-def test_edit_field_revalidates_and_audits(auth_client, user) -> None:
+def test_edit_field_revalidates_and_audits(staff_client, user, staff_user) -> None:
     doc = extracted(user, {**BANK_STATEMENT, "closing_balance": "4300.00"})
-    response = auth_client.patch(
+    response = staff_client.patch(
         url("field", doc, field_id=field_id(doc, "closing_balance")),
         {"value": "4,200.00"},
         format="json",
@@ -104,16 +105,16 @@ def test_edit_field_revalidates_and_audits(auth_client, user) -> None:
     assert closing["value"] == "4,200.00"
     assert closing["normalized_value"] == "4200.00"
     assert closing["status"] == FieldStatus.OK
-    assert closing["edited_by"] == user.pk
+    assert closing["edited_by"] == staff_user.pk
     assert body["issues"] == []
     entry = AuditLog.objects.get(document=doc, action=AuditAction.EDIT)
     assert entry.metadata["before"] == "4300.00"
     assert entry.metadata["after"] == "4,200.00"
 
 
-def test_edit_field_with_bad_value_is_flagged_not_rejected(auth_client, user) -> None:
+def test_edit_field_with_bad_value_is_flagged_not_rejected(staff_client, user) -> None:
     doc = extracted(user)
-    body = auth_client.patch(
+    body = staff_client.patch(
         url("field", doc, field_id=field_id(doc, "opening_balance")),
         {"value": "abc"},
         format="json",
@@ -122,18 +123,18 @@ def test_edit_field_with_bad_value_is_flagged_not_rejected(auth_client, user) ->
     assert opening["status"] == FieldStatus.ERROR
 
 
-def test_edit_unknown_field_is_404(auth_client, user) -> None:
+def test_edit_unknown_field_is_404(staff_client, user) -> None:
     doc = extracted(user)
     other = extracted(user)
-    response = auth_client.patch(
+    response = staff_client.patch(
         url("field", doc, field_id=field_id(other, "currency")), {"value": "USD"}, format="json"
     )
     assert response.status_code == 404
 
 
-def test_edit_line_recomputes_statement_amount(auth_client, user) -> None:
+def test_edit_line_recomputes_statement_amount(staff_client, user) -> None:
     doc = extracted(user)
-    body = auth_client.patch(
+    body = staff_client.patch(
         url("line", doc, line_id=line_id(doc, 1)), {"debit": "1400.00"}, format="json"
     ).json()
     line = body["lines"][0]
@@ -147,16 +148,16 @@ def test_edit_line_recomputes_statement_amount(auth_client, user) -> None:
     "payload",
     [{"debit": "-5.00"}, {"credit": "1.234"}, {"date": "03/09/2026"}, {"balance": "abc"}],
 )
-def test_edit_line_rejects_invalid_values(auth_client, user, payload) -> None:
+def test_edit_line_rejects_invalid_values(staff_client, user, payload) -> None:
     doc = extracted(user)
-    response = auth_client.patch(url("line", doc, line_id=line_id(doc, 1)), payload, format="json")
+    response = staff_client.patch(url("line", doc, line_id=line_id(doc, 1)), payload, format="json")
     assert response.status_code == 400
     assert response.json()["error"]["details"]
 
 
-def test_add_and_delete_lines(auth_client, user) -> None:
+def test_add_and_delete_lines(staff_client, user) -> None:
     doc = extracted(user)
-    body = auth_client.post(
+    body = staff_client.post(
         url("lines", doc),
         {"date": "2026-09-20", "description": "Fee", "debit": "10.00"},
         format="json",
@@ -166,31 +167,31 @@ def test_add_and_delete_lines(auth_client, user) -> None:
     assert any(i["rule_code"] == "balance_mismatch" for i in body["issues"])
 
     third = body["lines"][2]["id"]
-    body = auth_client.delete(url("line", doc, line_id=third)).json()
+    body = staff_client.delete(url("line", doc, line_id=third)).json()
     assert [line["line_no"] for line in body["lines"]] == [1, 2]
     assert body["issues"] == []
     assert ExtractedLine.all_objects.get(pk=third).is_deleted
 
-    body = auth_client.post(
+    body = staff_client.post(
         url("lines", doc), {"description": "x", "credit": "1.00"}, format="json"
     ).json()
     assert body["lines"][-1]["line_no"] == 4  # numbers are never reused
 
 
-def test_resolve_issue(auth_client, user) -> None:
+def test_resolve_issue(staff_client, user, staff_user) -> None:
     doc = extracted(user, {**BANK_STATEMENT, "statement_period_end": None})
     issue = doc.latest_result().issues.get()
-    body = auth_client.patch(
+    body = staff_client.patch(
         url("issue", doc, issue_id=issue.pk), {"resolved": True}, format="json"
     ).json()
     assert body["issues"][0]["resolved"] is True
-    assert body["issues"][0]["resolved_by"] == user.pk
+    assert body["issues"][0]["resolved_by"] == staff_user.pk
 
 
-def test_edits_blocked_after_approval(auth_client, user) -> None:
+def test_edits_blocked_after_approval(staff_client, user) -> None:
     doc = extracted(user)
-    auth_client.post(url("approve", doc), {}, format="json")
-    response = auth_client.patch(
+    staff_client.post(url("approve", doc), {}, format="json")
+    response = staff_client.patch(
         url("field", doc, field_id=field_id(doc, "currency")), {"value": "USD"}, format="json"
     )
     assert response.status_code == 409
@@ -200,35 +201,37 @@ def test_edits_blocked_after_approval(auth_client, user) -> None:
 # -------------------------------------------------------------------- actions
 
 
-def test_approve_blocked_then_acknowledged(auth_client, user) -> None:
+def test_approve_blocked_then_acknowledged(staff_client, user) -> None:
     doc = extracted(user, {**BANK_STATEMENT, "closing_balance": "4300.00"})
-    blocked = auth_client.post(url("approve", doc), {}, format="json")
+    blocked = staff_client.post(url("approve", doc), {}, format="json")
     assert blocked.status_code == 409
     assert blocked.json()["error"]["code"] == "approval_blocked"
 
-    ok = auth_client.post(
+    ok = staff_client.post(
         url("approve", doc), {"acknowledge_errors": True, "note": "bank typo"}, format="json"
     )
     assert ok.status_code == 200
     assert ok.json()["status"] == S.APPROVED
 
 
-def test_reject_requires_reason(auth_client, user) -> None:
+def test_reject_requires_reason(staff_client, user) -> None:
     doc = extracted(user)
-    assert auth_client.post(url("reject", doc), {}, format="json").status_code == 400
-    response = auth_client.post(url("reject", doc), {"reason": "Not ours"}, format="json")
+    assert staff_client.post(url("reject", doc), {}, format="json").status_code == 400
+    response = staff_client.post(url("reject", doc), {"reason": "Not ours"}, format="json")
     assert response.json()["status"] == S.REJECTED
 
 
-def test_clarify_and_resume(auth_client, user) -> None:
+def test_clarify_and_resume(staff_client, user) -> None:
     doc = extracted(user)
-    body = auth_client.post(url("clarify", doc), {"question": "Page 2?"}, format="json").json()
+    body = staff_client.post(url("clarify", doc), {"question": "Page 2?"}, format="json").json()
     assert body["status"] == S.NEEDS_CLARIFICATION
-    body = auth_client.post(url("resume-review", doc), format="json").json()
+    body = staff_client.post(url("resume-review", doc), format="json").json()
     assert body["status"] == S.NEEDS_REVIEW
 
 
+@override_settings(DOCUMENT_INTAKE={"REVIEW_PERMISSION_CLASSES": OWNER_OR_STAFF})
 def test_mark_duplicate(auth_client, user, other_user) -> None:
+    # Standalone set-up (uploader reviews), so "a document you cannot see" exists.
     doc = extracted(user)
     theirs = DocumentFactory(uploaded_by=other_user)
     response = auth_client.post(
@@ -243,36 +246,47 @@ def test_mark_duplicate(auth_client, user, other_user) -> None:
     assert body["duplicate_of"] == str(mine.id)
 
 
-def test_reprocess(auth_client, user, django_capture_on_commit_callbacks) -> None:
+def test_reprocess(staff_client, user, django_capture_on_commit_callbacks) -> None:
     doc = extracted(user)
     with (
         patch("document_intake.tasks.extract_document.delay") as delay,
         django_capture_on_commit_callbacks(execute=True),
     ):
-        body = auth_client.post(url("reprocess", doc), format="json").json()
+        body = staff_client.post(url("reprocess", doc), format="json").json()
     assert body["status"] == S.UPLOADED
     delay.assert_called_once_with(str(doc.id))
 
 
-def test_wrong_state_action_is_409(auth_client, user) -> None:
+def test_wrong_state_action_is_409(staff_client, user) -> None:
     doc = DocumentFactory(uploaded_by=user, status=S.PROCESSING)
-    response = auth_client.post(url("reject", doc), {"reason": "x"}, format="json")
+    response = staff_client.post(url("reject", doc), {"reason": "x"}, format="json")
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "invalid_transition"
 
 
-def test_review_permission_hook(auth_client, user) -> None:
+def test_client_can_view_but_not_review(auth_client, staff_client, user) -> None:
+    """Default set-up: the client uploads and looks; only the firm's staff decide."""
     doc = extracted(user)
-    staff_only = ("rest_framework.permissions.IsAdminUser",)
-    with override_settings(DOCUMENT_INTAKE={"REVIEW_PERMISSION_CLASSES": staff_only}):
-        assert auth_client.get(url("result", doc)).status_code == 200  # can still view
-        assert auth_client.post(url("approve", doc), {}, format="json").status_code == 403
-        response = auth_client.patch(
-            url("field", doc, field_id=field_id(doc, "currency")),
-            {"value": "USD"},
-            format="json",
-        )
-        assert response.status_code == 403
+    assert auth_client.get(url("result", doc)).status_code == 200
+    assert auth_client.get(url("file", doc)).status_code == 200
+    assert auth_client.get(url("activity", doc)).status_code == 200
+    edit = auth_client.patch(
+        url("field", doc, field_id=field_id(doc, "currency")), {"value": "USD"}, format="json"
+    )
+    assert edit.status_code == 403
+    assert auth_client.post(url("reject", doc), {"reason": "x"}, format="json").status_code == 403
+    assert auth_client.post(url("approve", doc), {}, format="json").status_code == 403
+    assert auth_client.get(url("export-csv", doc)).status_code == 403
+    doc.refresh_from_db()
+    assert doc.status == S.NEEDS_REVIEW
+
+    assert staff_client.post(url("approve", doc), {}, format="json").status_code == 200
+
+
+def test_review_permission_hook_can_let_uploader_review(auth_client, user) -> None:
+    doc = extracted(user)
+    with override_settings(DOCUMENT_INTAKE={"REVIEW_PERMISSION_CLASSES": OWNER_OR_STAFF}):
+        assert auth_client.post(url("approve", doc), {}, format="json").status_code == 200
 
 
 # ------------------------------------------------------------------------ file
@@ -313,16 +327,16 @@ def read_csv(response) -> list[list[str]]:
     return list(csv.reader(io.StringIO(response.content.decode())))
 
 
-def test_export_requires_approval(auth_client, user) -> None:
+def test_export_requires_approval(staff_client, user) -> None:
     doc = extracted(user)
-    response = auth_client.get(url("export-csv", doc))
+    response = staff_client.get(url("export-csv", doc))
     assert response.status_code == 409
 
 
-def test_export_statement(auth_client, user) -> None:
+def test_export_statement(staff_client, user) -> None:
     doc = extracted(user)
-    auth_client.post(url("approve", doc), {}, format="json")
-    response = auth_client.get(url("export-csv", doc))
+    staff_client.post(url("approve", doc), {}, format="json")
+    response = staff_client.get(url("export-csv", doc))
     assert response.status_code == 200
     assert response["Content-Type"] == "text/csv; charset=utf-8"
     assert 'filename="statement-v1.csv"' in response["Content-Disposition"]
@@ -334,26 +348,26 @@ def test_export_statement(auth_client, user) -> None:
     doc.refresh_from_db()
     assert doc.status == S.EXPORTED
     # Re-exporting is allowed and audited each time.
-    assert auth_client.get(url("export-csv", doc)).status_code == 200
+    assert staff_client.get(url("export-csv", doc)).status_code == 200
     assert AuditLog.objects.filter(document=doc, action=AuditAction.EXPORT).count() == 2
 
 
-def test_export_receipt_with_reviewer_account(auth_client, user) -> None:
+def test_export_receipt_with_reviewer_account(staff_client, user) -> None:
     doc = extracted(user, RECEIPT, DocType.RECEIPT)
-    auth_client.patch(
+    staff_client.patch(
         url("field", doc, field_id=field_id(doc, "account")),
         {"value": "5100 Supplies"},
         format="json",
     )
-    auth_client.post(url("approve", doc), {}, format="json")
-    rows = read_csv(auth_client.get(url("export-csv", doc)))
+    staff_client.post(url("approve", doc), {}, format="json")
+    rows = read_csv(staff_client.get(url("export-csv", doc)))
     assert rows == [
         ["Date", "Vendor", "Account", "Description", "Subtotal", "Tax", "Total", "Currency"],
         ["2026-09-03", "Hardware Store", "5100 Supplies", "", "100.00", "13.00", "113.00", "CAD"],
     ]
 
 
-def test_export_neutralises_formula_injection(auth_client, user) -> None:
+def test_export_neutralises_formula_injection(staff_client, user) -> None:
     data = {
         **BANK_STATEMENT,
         "transactions": [
@@ -362,8 +376,8 @@ def test_export_neutralises_formula_injection(auth_client, user) -> None:
         ],
     }
     doc = extracted(user, data)
-    auth_client.post(url("approve", doc), {}, format="json")
-    rows = read_csv(auth_client.get(url("export-csv", doc)))
+    staff_client.post(url("approve", doc), {}, format="json")
+    rows = read_csv(staff_client.get(url("export-csv", doc)))
     assert rows[1][1].startswith("'=")
 
 
@@ -401,14 +415,14 @@ def test_page_image_of_other_users_document_is_404(auth_client, other_user) -> N
     assert auth_client.get(url("pages", doc)).status_code == 404
 
 
-def test_activity(auth_client, user) -> None:
+def test_activity(staff_client, user, staff_user) -> None:
     doc = extracted(user)
-    auth_client.patch(
+    staff_client.patch(
         url("field", doc, field_id=field_id(doc, "currency")), {"value": "USD"}, format="json"
     )
-    entries = auth_client.get(url("activity", doc)).json()
+    entries = staff_client.get(url("activity", doc)).json()
     assert entries[0]["action"] == "edit"
-    assert entries[0]["actor"] == user.username
+    assert entries[0]["actor"] == staff_user.username
     assert entries[0]["metadata"]["after"] == "USD"
     assert {"System"} <= {e["actor"] for e in entries}
 

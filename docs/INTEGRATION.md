@@ -88,13 +88,17 @@ Three hooks, all in `DOCUMENT_INTAKE`:
 | Setting | Applies to | Default |
 |---|---|---|
 | `PERMISSION_CLASSES` | every API request and object | `IsOwnerOrStaff`: users see their own uploads, staff see all |
-| `REVIEW_PERMISSION_CLASSES` | edit, approve, reject, clarify, duplicate, reprocess, export | `IsOwnerOrStaff` |
+| `REVIEW_PERMISSION_CLASSES` | edit, approve, reject, clarify, duplicate, reprocess, export | module: `IsOwnerOrStaff`; this project's settings: `IsStaffReviewer` |
 | `DOCUMENT_SCOPE` | which documents a user can list or open (`(user, queryset) -> queryset`) | own uploads; staff all |
 
-For the portal, the spec says clients upload but never approve accounting entries, so
-set `REVIEW_PERMISSION_CLASSES` to a staff-only class, and make `DOCUMENT_SCOPE` follow
-client assignments (for example: client users see their company's documents; staff see
-their assigned clients). Documents outside the scope return 404, not 403.
+The spec says clients upload but never approve accounting entries. This project's
+settings therefore use `document_intake.api.permissions.IsStaffReviewer` (only
+`is_staff` users review); copy that line into the portal's `DOCUMENT_INTAKE`, or use the
+portal's own staff class. A client then still uploads, sees the list and opens the review
+page read-only: the review page hides every edit and action control, and the endpoints
+answer 403. Make `DOCUMENT_SCOPE` follow client assignments (for example: client users
+see their company's documents; staff see their assigned clients). Documents outside the
+scope return 404, not 403.
 
 ## 7. Signals
 

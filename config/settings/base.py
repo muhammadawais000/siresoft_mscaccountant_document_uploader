@@ -153,6 +153,8 @@ DOCUMENT_INTAKE = {
     "OLLAMA_TEXT_MODEL": env("OLLAMA_TEXT_MODEL", default=""),
     "OLLAMA_TIMEOUT_SECONDS": env.int("OLLAMA_TIMEOUT_SECONDS", default=180),
     "OLLAMA_NUM_CTX": env.int("OLLAMA_NUM_CTX", default=16384),
+    # Clients upload and view their own documents; only staff edit, approve, reject, export.
+    "REVIEW_PERMISSION_CLASSES": ("document_intake.api.permissions.IsStaffReviewer",),
 }
 
 # ----------------------------------------------------------------- Logging

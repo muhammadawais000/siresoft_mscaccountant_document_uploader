@@ -77,15 +77,22 @@
       Extraction is in progress. This page updates automatically.
     </div>
   {% elif document.status == "failed" %}
-    <div class="notice notice--err">Extraction failed: {{ document.error_message|default:"unknown reason" }}. Fix the cause and choose Reprocess.</div>
+    <div class="notice notice--err">Extraction failed: {{ document.error_message|default:"unknown reason" }}.{% if can_review %} Fix the cause and choose Reprocess.{% endif %}</div>
   {% elif document.status == "duplicate" %}
     <div class="notice notice--warn">
       This file is a duplicate of an earlier upload.
       {% if document.duplicate_of_id %}<a href="{% url 'document_intake:document-review' document.duplicate_of_id %}">Open the original</a>.{% endif %}
-      Choose Reprocess to extract it anyway.
+      {% if can_review %}Choose Reprocess to extract it anyway.{% endif %}
     </div>
   {% elif document.status == "needs_clarification" %}
+    {% if can_review %}
     <div class="notice notice--warn">Waiting for the client to answer a question. You can still edit; resume review when answered.</div>
+    {% else %}
+    <div class="notice notice--warn">Your accountant has a question about this document.</div>
+    {% endif %}
+  {% elif not can_review %}
+    {# A client (or anyone without review rights) only looks; the firm's team decides. #}
+    <div class="notice notice--info">This document is {{ document.get_status_display|lower }}. Your accounting firm reviews and approves it.</div>
   {% elif not editable %}
     <div class="notice notice--info">This document is {{ document.get_status_display|lower }}. Editing is closed.</div>
   {% endif %}

@@ -40,6 +40,14 @@ def auth_client(user) -> APIClient:
     return client
 
 
+@pytest.fixture
+def staff_client(staff_user) -> APIClient:
+    """The firm's reviewer: only staff may edit, approve, reject and export."""
+    client = APIClient()
+    client.force_authenticate(staff_user)
+    return client
+
+
 def make_pdf(lines: list[str] | None = None) -> bytes:
     """A one-page PDF with a real text layer."""
     buffer = io.BytesIO()

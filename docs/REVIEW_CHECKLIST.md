@@ -12,7 +12,7 @@ Status at the end of delivery step 9. ✅ done and tested · ⚠️ done with a 
 | Filenames sanitised; storage path never uses the client name | ✅ | `../../etc/passwd.pdf` test |
 | Private storage with no public URL; downloads only through a permission check | ✅ | `PrivateFileSystemStorage.url()` raises; file endpoint tests |
 | User A cannot see user B's document (API, file, pages, activity, UI) | ✅ | 404 tests on every endpoint |
-| Clients can be blocked from approving (`REVIEW_PERMISSION_CLASSES`) | ✅ | hook test; portal must configure it |
+| Clients cannot edit, approve, reject or export (`IsStaffReviewer` in `REVIEW_PERMISSION_CLASSES`) | ✅ | API and UI 403 tests; review page read-only for clients; portal copies the setting |
 | CSRF on session API; secure cookies, HSTS, SSL redirect in prod | ✅ | `check --deploy` clean (HSTS preload left off on purpose) |
 | CORS locked down | ✅ | no CORS headers are sent; cross-origin calls are blocked by browsers |
 | Content-Security-Policy on intake pages (no inline scripts) | ✅ | CSP test; the login page (host project) has no CSP yet ⚠️ |

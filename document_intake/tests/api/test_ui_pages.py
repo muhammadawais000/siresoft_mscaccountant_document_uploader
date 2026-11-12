@@ -25,8 +25,17 @@ HTMX = {"HTTP_HX_REQUEST": "true"}
 
 @pytest.fixture
 def ui_client(client, user):
+    """The client who uploads (may only look at the review page)."""
     client.force_login(user)
     return client
+
+
+@pytest.fixture
+def staff_ui_client(staff_user):
+    """The firm's reviewer (edits, approves, rejects, exports)."""
+    reviewer = Client()
+    reviewer.force_login(staff_user)
+    return reviewer
 
 
 def url(name, doc, **kwargs):
@@ -73,11 +82,13 @@ def test_logout_requires_post(ui_client) -> None:
     assert ui_client.post("/accounts/logout/").status_code == 302
 
 
-def test_post_without_csrf_token_is_refused(user) -> None:
+def test_post_without_csrf_token_is_refused(user, staff_user) -> None:
     client = Client(enforce_csrf_checks=True)
-    client.force_login(user)
+    client.force_login(staff_user)  # may edit, so a 403 here can only be the CSRF check
     doc = extracted(user)
-    assert client.post(url("add-line", doc), **HTMX).status_code == 403
+    response = client.post(url("add-line", doc), **HTMX)
+    assert response.status_code == 403
+    assert b"CSRF" in response.content
 
 
 # -------------------------------------------------------------------- list
@@ -156,9 +167,9 @@ def test_upload_without_files(ui_client) -> None:
 # ------------------------------------------------------------------ review
 
 
-def test_review_page_shows_extracted_data(ui_client, user) -> None:
+def test_review_page_shows_extracted_data(staff_ui_client, user) -> None:
     doc = extracted(user)
-    html = ui_client.get(url("document-review", doc)).content.decode()
+    html = staff_ui_client.get(url("document-review", doc)).content.decode()
     assert 'id="review-body"' in html
     assert "Transactions" in html
     assert "Totals check" in html
@@ -186,10 +197,10 @@ def test_review_status_polling(ui_client, user) -> None:
     assert response["HX-Refresh"] == "true"
 
 
-def test_edit_field_returns_fresh_panels(ui_client, user) -> None:
+def test_edit_field_returns_fresh_panels(staff_ui_client, user) -> None:
     doc = extracted(user)
     target = field(doc, "closing_balance")
-    response = ui_client.post(
+    response = staff_ui_client.post(
         url("edit-field", doc, field_id=target.pk), {"value": "4300.00"}, **HTMX
     )
     html = response.content.decode()
@@ -201,50 +212,50 @@ def test_edit_field_returns_fresh_panels(ui_client, user) -> None:
     assert target.value == "4300.00"
 
 
-def test_edit_line_accepts_people_style_money(ui_client, user) -> None:
+def test_edit_line_accepts_people_style_money(staff_ui_client, user) -> None:
     doc = extracted(user)
     row = line(doc, 1)
-    ui_client.post(url("edit-line", doc, line_id=row.pk), {"debit": "$1,234.50"}, **HTMX)
+    staff_ui_client.post(url("edit-line", doc, line_id=row.pk), {"debit": "$1,234.50"}, **HTMX)
     row.refresh_from_db()
     assert row.debit == Decimal("1234.50")
     assert row.description  # columns that were not sent are untouched
 
 
-def test_edit_line_invalid_value_shows_message(ui_client, user) -> None:
+def test_edit_line_invalid_value_shows_message(staff_ui_client, user) -> None:
     doc = extracted(user)
     row = line(doc, 1)
-    response = ui_client.post(url("edit-line", doc, line_id=row.pk), {"debit": "abc"}, **HTMX)
+    response = staff_ui_client.post(url("edit-line", doc, line_id=row.pk), {"debit": "abc"}, **HTMX)
     assert response["HX-Retarget"] == "#messages"
     assert b"Not saved" in response.content
 
 
-def test_add_delete_line_and_resolve_issue(ui_client, user) -> None:
+def test_add_delete_line_and_resolve_issue(staff_ui_client, user) -> None:
     doc = extracted(user, {**BANK_STATEMENT, "closing_balance": "4300.00"})
     count = doc.latest_result().lines.count()
-    ui_client.post(url("add-line", doc), **HTMX)
+    staff_ui_client.post(url("add-line", doc), **HTMX)
     assert doc.latest_result().lines.count() == count + 1
-    ui_client.post(url("delete-line", doc, line_id=line(doc, 1).pk), **HTMX)
+    staff_ui_client.post(url("delete-line", doc, line_id=line(doc, 1).pk), **HTMX)
     assert doc.latest_result().lines.count() == count
 
     issue = doc.latest_result().issues.filter(severity="error").first()
-    ui_client.post(url("resolve-issue", doc, issue_id=issue.pk), {"resolved": "1"}, **HTMX)
+    staff_ui_client.post(url("resolve-issue", doc, issue_id=issue.pk), {"resolved": "1"}, **HTMX)
     issue.refresh_from_db()
     assert issue.resolved
 
 
-def test_unknown_line_is_404(ui_client, user) -> None:
+def test_unknown_line_is_404(staff_ui_client, user) -> None:
     doc = extracted(user)
     missing = "00000000-0000-0000-0000-000000000001"
-    assert ui_client.post(url("edit-line", doc, line_id=missing), **HTMX).status_code == 404
+    assert staff_ui_client.post(url("edit-line", doc, line_id=missing), **HTMX).status_code == 404
 
 
-def test_approve_blocked_then_acknowledged(ui_client, user) -> None:
+def test_approve_blocked_then_acknowledged(staff_ui_client, user) -> None:
     doc = extracted(user, {**BANK_STATEMENT, "closing_balance": "4300.00"})
-    blocked = ui_client.post(url("approve", doc), **HTMX)
+    blocked = staff_ui_client.post(url("approve", doc), **HTMX)
     assert blocked["HX-Retarget"] == "#messages"
     assert b"unresolved error" in blocked.content
 
-    ok = ui_client.post(
+    ok = staff_ui_client.post(
         url("approve", doc), {"acknowledge_errors": "on"}, HTTP_HX_PROMPT="bank typo", **HTMX
     )
     assert ok["HX-Refresh"] == "true"
@@ -254,46 +265,81 @@ def test_approve_blocked_then_acknowledged(ui_client, user) -> None:
     assert entry.metadata["note"] == "bank typo"
 
 
-def test_reject_and_clarify_need_text(ui_client, user) -> None:
+def test_reject_and_clarify_need_text(staff_ui_client, user) -> None:
     doc = extracted(user)
-    assert b"Write a reason" in ui_client.post(url("reject", doc), **HTMX).content
-    assert b"Write the question" in ui_client.post(url("clarify", doc), **HTMX).content
+    assert b"Write a reason" in staff_ui_client.post(url("reject", doc), **HTMX).content
+    assert b"Write the question" in staff_ui_client.post(url("clarify", doc), **HTMX).content
 
-    ui_client.post(url("clarify", doc), HTTP_HX_PROMPT="Which card?", **HTMX)
+    staff_ui_client.post(url("clarify", doc), HTTP_HX_PROMPT="Which card?", **HTMX)
     doc.refresh_from_db()
     assert doc.status == S.NEEDS_CLARIFICATION
-    ui_client.post(url("resume-review", doc), **HTMX)
-    ui_client.post(url("reject", doc), HTTP_HX_PROMPT="Wrong document", **HTMX)
+    staff_ui_client.post(url("resume-review", doc), **HTMX)
+    staff_ui_client.post(url("reject", doc), HTTP_HX_PROMPT="Wrong document", **HTMX)
     doc.refresh_from_db()
     assert doc.status == S.REJECTED
 
 
-def test_mark_duplicate_and_reprocess(ui_client, user, django_capture_on_commit_callbacks) -> None:
+def test_mark_duplicate_and_reprocess(
+    staff_ui_client, user, django_capture_on_commit_callbacks
+) -> None:
     doc = extracted(user)
-    ui_client.post(url("mark-duplicate", doc), **HTMX)
+    staff_ui_client.post(url("mark-duplicate", doc), **HTMX)
     doc.refresh_from_db()
     assert doc.status == S.DUPLICATE
     with override_settings(CELERY_TASK_ALWAYS_EAGER=False):
-        response = ui_client.post(url("reprocess", doc), **HTMX)
+        response = staff_ui_client.post(url("reprocess", doc), **HTMX)
     assert response["HX-Refresh"] == "true"
     doc.refresh_from_db()
     assert doc.status == S.UPLOADED
 
 
-def test_wrong_state_action_shows_message(ui_client, user) -> None:
+def test_wrong_state_action_shows_message(staff_ui_client, user) -> None:
     doc = DocumentFactory(uploaded_by=user, status=S.APPROVED)
-    response = ui_client.post(url("resume-review", doc), **HTMX)
+    response = staff_ui_client.post(url("resume-review", doc), **HTMX)
     assert response["HX-Retarget"] == "#messages"
 
 
-def test_review_permission_hook(ui_client, user) -> None:
+def test_client_sees_review_page_without_controls(ui_client, user) -> None:
     doc = extracted(user)
-    staff_only = ("rest_framework.permissions.IsAdminUser",)
-    with override_settings(DOCUMENT_INTAKE={"REVIEW_PERMISSION_CLASSES": staff_only}):
-        assert ui_client.get(url("document-review", doc)).status_code == 200  # can view
-        assert ui_client.post(url("approve", doc), **HTMX).status_code == 403
-        edit = url("edit-field", doc, field_id=field(doc, "currency").pk)
-        assert ui_client.post(edit, {"value": "USD"}, **HTMX).status_code == 403
+    html = ui_client.get(url("document-review", doc)).content.decode()
+    assert "Your accounting firm reviews and approves it" in html
+    assert 'id="field-closing_balance"' in html  # the data is shown...
+    assert "hx-post=" not in html  # ...but nothing can be changed
+    for name in ("Approve", "Reject", "Export CSV", "Add row", "Acknowledge"):
+        assert f">{name}<" not in html
+
+
+def test_client_cannot_review(ui_client, user) -> None:
+    doc = extracted(user)
+    edit = url("edit-field", doc, field_id=field(doc, "currency").pk)
+    assert ui_client.post(edit, {"value": "USD"}, **HTMX).status_code == 403
+    row = url("edit-line", doc, line_id=line(doc, 1).pk)
+    assert ui_client.post(row, {"debit": "abc"}, **HTMX).status_code == 403
+    assert ui_client.post(url("add-line", doc), **HTMX).status_code == 403
+    assert ui_client.post(url("approve", doc), **HTMX).status_code == 403
+    assert ui_client.post(url("reject", doc), HTTP_HX_PROMPT="x", **HTMX).status_code == 403
+    assert ui_client.get(url("export-csv", doc)).status_code == 403
+    doc.refresh_from_db()
+    assert doc.status == S.NEEDS_REVIEW
+    assert field(doc, "currency").value != "USD"
+
+
+def test_client_notice_while_firm_asks_a_question(ui_client, staff_ui_client, user) -> None:
+    doc = extracted(user)
+    staff_ui_client.post(url("clarify", doc), HTTP_HX_PROMPT="Which card?", **HTMX)
+    html = ui_client.get(url("document-review", doc)).content.decode()
+    assert "Your accountant has a question" in html
+    assert "You can still edit" not in html
+
+
+def test_review_permission_hook_can_let_uploader_review(ui_client, user) -> None:
+    doc = extracted(user)
+    owner_or_staff = ("document_intake.api.permissions.IsOwnerOrStaff",)
+    with override_settings(DOCUMENT_INTAKE={"REVIEW_PERMISSION_CLASSES": owner_or_staff}):
+        assert ">Approve<" in ui_client.get(url("document-review", doc)).content.decode()
+        ui_client.post(url("approve", doc), **HTMX)
+    doc.refresh_from_db()
+    assert doc.status == S.APPROVED
 
 
 def test_edits_blocked_on_other_users_document(ui_client, other_user) -> None:
@@ -324,21 +370,23 @@ def test_original_file_is_audited(ui_client, user) -> None:
     assert entry.metadata == {"disposition": "attachment"}
 
 
-def test_export_only_after_approval(ui_client, user) -> None:
+def test_export_only_after_approval(staff_ui_client, user) -> None:
     doc = extracted(user, RECEIPT, DocType.RECEIPT)
-    assert ui_client.get(url("export-csv", doc)).status_code == 409
-    ui_client.post(url("approve", doc), {"acknowledge_errors": "on"}, **HTMX)
-    response = ui_client.get(url("export-csv", doc))
+    assert staff_ui_client.get(url("export-csv", doc)).status_code == 409
+    staff_ui_client.post(url("approve", doc), {"acknowledge_errors": "on"}, **HTMX)
+    response = staff_ui_client.get(url("export-csv", doc))
     assert response.status_code == 200
     assert response.content.decode().startswith("Date,Vendor,Account")
     doc.refresh_from_db()
     assert doc.status == S.EXPORTED
 
 
-def test_activity_partial(ui_client, user) -> None:
+def test_activity_partial(staff_ui_client, user) -> None:
     doc = extracted(user)
-    ui_client.post(url("edit-field", doc, field_id=field(doc, "currency").pk), {"value": "USD"})
-    html = ui_client.get(url("activity", doc), **HTMX).content.decode()
+    staff_ui_client.post(
+        url("edit-field", doc, field_id=field(doc, "currency").pk), {"value": "USD"}
+    )
+    html = staff_ui_client.get(url("activity", doc), **HTMX).content.decode()
     assert "currency:" in html
     assert "USD" in html
     assert "Version 1" in html

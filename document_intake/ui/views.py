@@ -134,16 +134,28 @@ def get_document(request: HttpRequest, pk: Any, *, review_action: bool = False) 
     document = access.visible_documents(request.user).filter(pk=pk).first()
     if document is None:
         raise Http404("Document not found.")
+    if not is_allowed(request, document, review_action=review_action):
+        raise PermissionDenied
+    return document
+
+
+def is_allowed(request: HttpRequest, document: Document, *, review_action: bool = False) -> bool:
+    """True if every configured permission class lets this user act on the document.
+
+    With ``review_action=True`` the REVIEW_PERMISSION_CLASSES are checked too (edit,
+    approve, reject, export). The review page also uses this to hide those buttons.
+    """
     classes = configured_permission_classes()
     if review_action:
         classes += configured_review_permission_classes()
     req: Any = request  # DRF permission classes accept a plain Django request too
     for permission_class in classes:
         permission = permission_class()
-        allowed = permission.has_permission(req, None)  # type: ignore[arg-type]
-        if not allowed or not permission.has_object_permission(req, None, document):  # type: ignore[arg-type]
-            raise PermissionDenied
-    return document
+        if not permission.has_permission(req, None):  # type: ignore[arg-type]
+            return False
+        if not permission.has_object_permission(req, None, document):  # type: ignore[arg-type]
+            return False
+    return True
 
 
 def show_message(request: HttpRequest, text: str, tone: str = "err") -> HttpResponse:
@@ -253,13 +265,18 @@ def _latest_result(document: Document) -> ExtractionResult | None:
     )
 
 
-def review_context(document: Document) -> dict[str, Any]:
-    """Everything the review panels need, worked out on the server."""
+def review_context(document: Document, *, can_review: bool) -> dict[str, Any]:
+    """Everything the review panels need, worked out on the server.
+
+    ``can_review`` is False for users who may only look (e.g. a client in a portal that
+    keeps approving to staff): then every edit control is hidden.
+    """
     result = _latest_result(document)
     context: dict[str, Any] = {
         "document": document,
         "result": result,
-        "editable": document.status in EDITABLE,
+        "can_review": can_review,
+        "editable": can_review and document.status in EDITABLE,
         "in_progress": document.status in IN_PROGRESS,
         "poll_seconds": POLL_SECONDS,
         "doc_type_label": dict(DocType.choices).get(
@@ -324,7 +341,8 @@ def review_context(document: Document) -> dict[str, Any]:
 def render_review_body(request: HttpRequest, document: Document) -> HttpResponse:
     """The right-hand panels (details, lines, totals, validation), re-rendered."""
     document.refresh_from_db()
-    context = review_context(document)
+    # Only reached after get_document(..., review_action=True) passed, so the user may review.
+    context = review_context(document, can_review=True)
     context["clear_messages"] = True  # an edit worked, so remove any old error message
     return render(request, "document_intake/partials/review_body.html", context)
 
@@ -333,14 +351,15 @@ def render_review_body(request: HttpRequest, document: Document) -> HttpResponse
 @require_GET
 def document_review(request: HttpRequest, pk: Any) -> HttpResponse:
     document = get_document(request, pk)
-    context = review_context(document)
+    can_review = is_allowed(request, document, review_action=True)
+    context = review_context(document, can_review=can_review)
     context.update(
         _page_context(
             page_count=_page_count(document),
             page_number=1,
-            can_reject=document.status in CAN_REJECT,
-            can_reprocess=document.status in CAN_REJECT,
-            can_export=document.status in export.EXPORTABLE,
+            can_reject=can_review and document.status in CAN_REJECT,
+            can_reprocess=can_review and document.status in CAN_REJECT,
+            can_export=can_review and document.status in export.EXPORTABLE,
         )
     )
     return render(request, "document_intake/document_review.html", context)
@@ -387,6 +406,7 @@ def edit_field(request: HttpRequest, pk: Any, field_id: Any) -> HttpResponse:
 @intake_view
 @require_POST
 def edit_line(request: HttpRequest, pk: Any, line_id: Any) -> HttpResponse:
+    get_document(request, pk, review_action=True)  # 404 / 403 before looking at the values
     form = LineForm(request.POST)
     if not form.is_valid():
         return show_message(request, f"Not saved. {form.error_text()}")
