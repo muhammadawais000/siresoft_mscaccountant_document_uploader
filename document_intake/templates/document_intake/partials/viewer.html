@@ -1,0 +1,20 @@
+{# Document preview. Previous / Next ask the server for this panel with another page number. #}
+<section class="panel viewer" id="viewer" aria-label="Document preview">
+  <div class="viewer__toolbar">
+    <button class="btn btn--sm" type="button" aria-label="Previous page"
+            hx-get="{% url 'document_intake:viewer' document.pk %}?page={{ page_number|add:'-1' }}"
+            hx-target="#viewer" hx-swap="outerHTML"
+            {% if page_number <= 1 %}disabled{% endif %}>‹</button>
+    <span aria-live="polite">Page {{ page_number }} of {{ page_count }}</span>
+    <button class="btn btn--sm" type="button" aria-label="Next page"
+            hx-get="{% url 'document_intake:viewer' document.pk %}?page={{ page_number|add:'1' }}"
+            hx-target="#viewer" hx-swap="outerHTML"
+            {% if page_number >= page_count %}disabled{% endif %}>›</button>
+    <span class="viewer__spacer"></span>
+    <a class="btn btn--sm btn--ghost" href="{% url 'document_intake:file' document.pk %}" target="_blank" rel="noopener">Original</a>
+  </div>
+  <div class="viewer__stage">
+    <img class="viewer__page" src="{% url 'document_intake:page-image' document.pk page_number %}"
+         alt="Page {{ page_number }} of {{ document.original_filename }}">
+  </div>
+</section>

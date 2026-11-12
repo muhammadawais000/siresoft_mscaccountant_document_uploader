@@ -465,3 +465,15 @@
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
 }
+
+/* ------------------------------------------------------------ htmx */
+/* htmx adds "htmx-request" while a request runs; indicators show only then. */
+.htmx-indicator { display: none; }
+.htmx-request.htmx-indicator,
+.htmx-request .htmx-indicator { display: block; }
+
+/* Collapsible panel (Activity) */
+details.panel > summary { cursor: pointer; list-style: none; }
+details.panel > summary::-webkit-details-marker { display: none; }
+details.panel > summary::after { content: "▸"; margin-left: auto; color: var(--c-ink-faint); }
+details.panel[open] > summary::after { content: "▾"; }

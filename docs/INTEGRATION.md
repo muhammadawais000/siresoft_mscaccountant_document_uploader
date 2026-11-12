@@ -29,7 +29,8 @@ The prefixes can change; the UI reads its API base and page URLs from `reverse()
 Two namespaces are used because the API and the UI are separate URL modules:
 `document_intake_api:*` for the API and `document_intake:*` for pages.
 
-If the portal has its own React frontend, mount only the API and ignore the UI.
+If the portal has its own React frontend, mount only the API and ignore the UI. The UI
+does not depend on the API: it is server-rendered with HTMX and calls the same services.
 
 ## 3. Storage
 
@@ -121,4 +122,5 @@ the UI do not change.
 
 UI templates extend `document_intake/base.html`. To use the portal's shell, override that
 template in the portal's template directory and keep the `head`, `page_title`, `actions`,
-`content` and `scripts` blocks, the `csrf-token` meta tag and `data-api-base` on `<body>`.
+`content` and `scripts` blocks, the `htmx-config` meta tag, the `hx-headers` CSRF attribute
+on `<body>`, the `#messages` element and the `vendor/htmx.min.js` script.

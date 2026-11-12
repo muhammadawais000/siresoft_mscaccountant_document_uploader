@@ -11,7 +11,9 @@ can be exported as CSV.
 > frontend loads no CDN, font or script from outside this application.
 
 - Python 3.12, Django 5, DRF, PostgreSQL 16, Celery + Redis, Ollama
-- Plain HTML/CSS/JS frontend (ES modules, no framework, no build step)
+- Server-rendered pages with [HTMX](https://htmx.org) 2.0.4 (served from our own static
+  files, no CDN, no build step). Views return small HTML pieces; there is almost no
+  custom JavaScript (only `js/upload.js` for drag-and-drop and the progress bar)
 - Standalone today; designed to be mounted in the MSC accounting portal
   ([docs/INTEGRATION.md](docs/INTEGRATION.md))
 
@@ -76,9 +78,9 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 | Command | What it does |
 |---|---|
-| `make check` | Everything CI runs: ruff, mypy, pytest, JS tests |
+| `make check` | Everything CI runs: ruff, mypy, pytest, JS syntax check |
 | `make test` / `make cov` | Python tests / with coverage |
-| `make jstest` | JS syntax check and unit tests (`node --test`, no npm packages) |
+| `make jstest` | Syntax check of `js/upload.js` |
 | `make format` | Auto-format and fix lint |
 | `make seed` | Demo user and documents |
 | `make check-ollama` | Verify Ollama and the configured models |
@@ -121,7 +123,7 @@ document_intake/        the reusable app
   extraction/           routing, PDF/image readers, schemas, prompts, parsing
   providers/            ExtractionProvider interface + OllamaProvider
   models/               Document, ExtractionResult, fields, lines, issues, audit log
-  static/ templates/    CSS (tokens, base, layout, components, review) and ES modules
+  static/ templates/    CSS, vendor/htmx.min.js, upload.js; pages + partials/ (HTMX pieces)
   tests/                pytest suite and node tests
 docs/                   ARCHITECTURE, INTEGRATION, REVIEW_CHECKLIST
 ```

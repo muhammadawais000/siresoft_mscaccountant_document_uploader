@@ -2,111 +2,106 @@
 {% load static %}
 {% block title %}Review {{ document.original_filename }}{% endblock %}
 {% block head %}<link rel="stylesheet" href="{% static 'document_intake/css/review.css' %}">{% endblock %}
-{% block page_title %}<a class="topbar__crumb" href="{% url 'document_intake:document-list' %}">Documents</a> <span class="topbar__crumb" aria-hidden="true">/</span> <span data-filename>{{ document.original_filename }}</span>{% endblock %}
+{% block page_title %}<a class="topbar__crumb" href="{% url 'document_intake:document-list' %}">Documents</a> <span class="topbar__crumb" aria-hidden="true">/</span> <span>{{ document.original_filename }}</span>{% endblock %}
 
+{% comment %}
+  Status-changing buttons. Each one POSTs with htmx. On success the server answers
+  "HX-Refresh: true" and the whole page reloads with the new status; on failure it
+  answers with a message that htmx puts into #messages.
+  hx-prompt asks the user for text (window.prompt) and sends it in the HX-Prompt header.
+  hx-confirm asks "OK / Cancel" before sending.
+{% endcomment %}
 {% block actions %}
-  <button class="btn" type="button" data-action="save" disabled>Save changes</button>
+  {% if editable or can_reprocess %}
   <details class="menu">
-    <summary class="btn" aria-haspopup="menu">More</summary>
-    <div class="menu__list" role="menu">
-      <button class="menu__item" type="button" role="menuitem" data-action="clarify">Ask client a question</button>
-      <button class="menu__item" type="button" role="menuitem" data-action="resume" hidden>Resume review</button>
-      <button class="menu__item" type="button" role="menuitem" data-action="duplicate">Mark as duplicate</button>
-      <button class="menu__item" type="button" role="menuitem" data-action="reprocess">Reprocess</button>
+    <summary class="btn">More</summary>
+    <div class="menu__list">
+      {% if document.status == "needs_review" %}
+      <button class="menu__item" type="button"
+              hx-post="{% url 'document_intake:clarify' document.pk %}"
+              hx-prompt="Question for the client (review pauses until it is answered):">Ask client a question</button>
+      <button class="menu__item" type="button"
+              hx-post="{% url 'document_intake:mark-duplicate' document.pk %}"
+              hx-confirm="Mark as duplicate? It will not be exported.">Mark as duplicate</button>
+      {% endif %}
+      {% if document.status == "needs_clarification" %}
+      <button class="menu__item" type="button"
+              hx-post="{% url 'document_intake:resume-review' document.pk %}">Resume review</button>
+      {% endif %}
+      {% if can_reprocess %}
+      <button class="menu__item" type="button"
+              hx-post="{% url 'document_intake:reprocess' document.pk %}"
+              hx-confirm="Run extraction again? A new version is created; the current one stays in the history.">Reprocess</button>
+      {% endif %}
     </div>
   </details>
-  <a class="btn" data-action="export" href="#" download aria-disabled="true">Export CSV</a>
-  <button class="btn btn--danger" type="button" data-action="reject">Reject</button>
-  <button class="btn btn--primary" type="button" data-action="approve" disabled>Approve</button>
+  {% endif %}
+  {% if can_export %}
+  <a class="btn" href="{% url 'document_intake:export-csv' document.pk %}" download>Export CSV</a>
+  {% endif %}
+  {% if can_reject %}
+  <button class="btn btn--danger" type="button"
+          hx-post="{% url 'document_intake:reject' document.pk %}"
+          hx-prompt="Reason for rejecting (required):">Reject</button>
+  {% endif %}
+  {% if editable %}
+  <button class="btn btn--primary" type="button"
+          hx-post="{% url 'document_intake:approve' document.pk %}"
+          hx-include="#ack-box"
+          hx-prompt="Approve this document? Optional note:">Approve</button>
+  {% endif %}
 {% endblock %}
 
 {% block main_class %}content--wide{% endblock %}
 {% block content %}
+{% load intake_ui %}
 <div class="statusbar">
-  <span class="badge" data-status-badge>{{ document.get_status_display }}</span>
-  <span class="statusbar__meta" data-meta></span>
-  <span class="statusbar__save" data-save-state aria-live="polite"></span>
+  <span class="badge badge--{{ document.status|tone }}">{{ document.get_status_display }}</span>
+  <span class="statusbar__meta">
+    <span>{{ doc_type_label }}</span>
+    {% if result %}
+    <span>Version {{ result.version }}</span>
+    <span>{{ method_label }}</span>
+    <span>Model {{ result.model_name }}</span>
+    <span>Extracted {{ result.created_at|date:"M j, Y, H:i" }}</span>
+    {% endif %}
+  </span>
 </div>
 
-<div class="tabs" role="tablist" aria-label="Document views">
-  <button class="tabs__tab" type="button" role="tab" id="tab-review" aria-selected="true"
-          aria-controls="panel-review" data-tab="review">Review</button>
-  <button class="tabs__tab" type="button" role="tab" id="tab-activity" aria-selected="false"
-          aria-controls="panel-activity" data-tab="activity" tabindex="-1">Activity</button>
-</div>
-
-<div data-notices class="stack"></div>
-
-<div id="panel-review" role="tabpanel" aria-labelledby="tab-review">
-  <div class="review">
-    <section class="panel viewer" data-viewer aria-label="Document preview" tabindex="0">
-      <div class="viewer__toolbar">
-        <button class="btn btn--sm" type="button" data-page-prev aria-label="Previous page">‹</button>
-        <span data-page-label aria-live="polite">Page 1</span>
-        <button class="btn btn--sm" type="button" data-page-next aria-label="Next page">›</button>
-        <span class="viewer__spacer"></span>
-        <button class="btn btn--sm" type="button" data-zoom-out aria-label="Zoom out">−</button>
-        <span class="viewer__zoom" data-zoom-label>100%</span>
-        <button class="btn btn--sm" type="button" data-zoom-in aria-label="Zoom in">+</button>
-        <button class="btn btn--sm" type="button" data-zoom-fit>Fit</button>
-        <a class="btn btn--sm btn--ghost" href="{{ file_url }}" target="_blank" rel="noopener">Original</a>
-      </div>
-      <div class="viewer__stage" data-stage>
-        <span class="skeleton viewer__loading"></span>
-      </div>
-    </section>
-
-    <div class="review__side" data-side aria-busy="true">
-      <section class="panel" aria-labelledby="fields-title">
-        <div class="panel__header"><h2 class="panel__title" id="fields-title">Details</h2></div>
-        <div class="panel__body"><div class="fields" data-fields>
-          <span class="skeleton skeleton--w80"></span><span class="skeleton skeleton--w60"></span>
-        </div></div>
-      </section>
-
-      <section class="panel lines" data-lines-panel aria-labelledby="lines-title">
-        <div class="panel__header">
-          <h2 class="panel__title" id="lines-title" data-lines-title>Lines</h2>
-          <button class="btn btn--sm" type="button" data-add-line hidden>Add row</button>
-        </div>
-        <div class="table-wrap">
-          <table class="data-table" data-lines>
-            <thead></thead><tbody></tbody><tfoot></tfoot>
-          </table>
-        </div>
-      </section>
-
-      <section class="panel" aria-labelledby="totals-title">
-        <div class="panel__header">
-          <h2 class="panel__title" id="totals-title">Totals check</h2>
-          <span class="field__hint">Updates as you type</span>
-        </div>
-        <div data-totals></div>
-      </section>
-
-      <section class="panel" aria-labelledby="issues-title">
-        <div class="panel__header">
-          <h2 class="panel__title" id="issues-title">Validation</h2>
-          <span class="field__hint" data-issues-summary aria-live="polite"></span>
-        </div>
-        <ul class="issues" data-issues></ul>
-        <label class="ack" data-ack hidden>
-          <input type="checkbox" data-ack-box>
-          <span data-ack-text></span>
-        </label>
-      </section>
+<div class="stack">
+  {% if in_progress %}
+    {# Ask every few seconds. "204 No Content" = still running; when done the server reloads the page. #}
+    <div class="notice notice--info" role="status"
+         hx-get="{% url 'document_intake:review-status' document.pk %}"
+         hx-trigger="every {{ poll_seconds }}s">
+      Extraction is in progress. This page updates automatically.
     </div>
-  </div>
+  {% elif document.status == "failed" %}
+    <div class="notice notice--err">Extraction failed: {{ document.error_message|default:"unknown reason" }}. Fix the cause and choose Reprocess.</div>
+  {% elif document.status == "duplicate" %}
+    <div class="notice notice--warn">
+      This file is a duplicate of an earlier upload.
+      {% if document.duplicate_of_id %}<a href="{% url 'document_intake:document-review' document.duplicate_of_id %}">Open the original</a>.{% endif %}
+      Choose Reprocess to extract it anyway.
+    </div>
+  {% elif document.status == "needs_clarification" %}
+    <div class="notice notice--warn">Waiting for the client to answer a question. You can still edit; resume review when answered.</div>
+  {% elif not editable %}
+    <div class="notice notice--info">This document is {{ document.get_status_display|lower }}. Editing is closed.</div>
+  {% endif %}
 </div>
 
-<div id="panel-activity" role="tabpanel" aria-labelledby="tab-activity" hidden>
-  <section class="panel" aria-label="Activity">
-    <ul class="activity" data-activity></ul>
-  </section>
+<div class="review">
+  {% include "document_intake/partials/viewer.html" %}
+  {% if result %}
+    {% include "document_intake/partials/review_body.html" %}
+  {% endif %}
 </div>
-{% endblock %}
 
-{% block scripts %}
-{{ page_config|json_script:"review-config" }}
-<script type="module" src="{% static 'document_intake/js/review.js' %}"></script>
+{# Loaded only the first time it is opened ("toggle once"). #}
+<details class="panel" hx-get="{% url 'document_intake:activity' document.pk %}"
+         hx-trigger="toggle once" hx-target="#activity-list">
+  <summary class="panel__header"><span class="panel__title">Activity</span></summary>
+  <ul class="activity" id="activity-list"><li class="activity__item">Loading…</li></ul>
+</details>
 {% endblock %}

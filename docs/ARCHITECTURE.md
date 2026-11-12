@@ -32,7 +32,7 @@ many pages), the document goes to `failed` with an operator-readable reason.
 
 | Layer | Location | Rule |
 |---|---|---|
-| Views | `api/views.py`, `ui/views.py` | Parse input, call one service, serialise output. No logic. |
+| Views | `api/views.py`, `ui/views.py` | Parse input, call one service, return JSON (API) or HTML (UI). No logic. |
 | Services | `services/` | All business logic and transactions. |
 | Validators | `validators/` | Pure Python, no Django; typed inputs, typed `Issue` outputs. |
 | Extraction | `extraction/` | Routing, PDF/image reading, schemas, prompts, parsing. |
@@ -62,6 +62,21 @@ only from `needs_review` through `approve()`.
   `DECIMAL(14,2)`. Lines are soft-deleted.
 - `ValidationIssue`: rule code, severity, field or line, message, resolved by whom.
 - `AuditLog`: append-only (ORM guard and a PostgreSQL trigger that rejects UPDATE/DELETE).
+
+## The pages (HTMX)
+
+The UI in `ui/` does not call the JSON API. It is plain Django views and templates:
+
+| User does | htmx sends | Server answers |
+|---|---|---|
+| Types in a filter, sorts, pages | `GET /intake/?search=…` with `HX-Request` | only `partials/documents_table.html` |
+| A file is processing | the table repeats its own GET every 4 s | the table again; once nothing is processing it has no polling trigger, so polling stops |
+| Uploads files | `POST /intake/upload/` (multipart) | one line per file + `HX-Trigger: documents-changed`, which reloads the table |
+| Edits a field or cell, adds/removes a row, acknowledges an issue | `POST …/fields/<id>/` etc. on `change` | `partials/review_body.html` re-rendered and re-validated (totals computed in Python) |
+| Approves, rejects, asks the client, reprocesses | `POST …/approve/` (text via `hx-prompt`) | `HX-Refresh: true` (page reloads) or an error in `#messages` |
+
+`base.html` sets the CSRF header for every htmx request (`hx-headers`) and configures htmx
+for the strict CSP: no injected styles, no `eval`, no page snapshots in `localStorage`.
 
 ## Why these choices
 

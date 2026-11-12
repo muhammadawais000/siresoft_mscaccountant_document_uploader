@@ -1,0 +1,97 @@
+{% load intake_ui %}
+{% comment %}
+  The documents table. The server sends this piece again when:
+  - a filter, sort or page changes (the filter form and the pager links ask for it),
+  - an upload finishes (the "documents-changed" event below),
+  - every few seconds, but ONLY while a document is still uploaded/processing ("poll").
+  When nothing is processing any more, the new piece has no "every" trigger, so the
+  polling stops by itself.
+{% endcomment %}
+<div id="documents"
+     hx-get="{% url 'document_intake:document-list' %}{% querystring %}"
+     hx-trigger="documents-changed from:body{% if poll %}, every {{ poll_seconds }}s{% endif %}"
+     hx-swap="outerHTML">
+  <div class="table-wrap">
+    <table class="data-table">
+      <caption class="visually-hidden">Uploaded documents</caption>
+      <thead>
+        <tr>
+          <th scope="col">File</th>
+          <th scope="col">Type</th>
+          <th scope="col">Status</th>
+          <th scope="col" class="num">Uploaded</th>
+          <th scope="col" class="num">Open issues</th>
+          <th scope="col"><span class="visually-hidden">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for doc in page %}
+        <tr>
+          <td class="data-table__file">
+            {% if doc.status == "uploaded" or doc.status == "processing" %}
+              <span title="{{ doc.original_filename }}">{{ doc.original_filename }}</span>
+            {% else %}
+              <a href="{% url 'document_intake:document-review' doc.pk %}" title="{{ doc.original_filename }}">{{ doc.original_filename }}</a>
+            {% endif %}
+            {% if doc.status == "failed" %}
+              <span class="data-table__sub">{{ doc.error_message }}</span>
+            {% elif doc.duplicate_of_id %}
+              <span class="data-table__sub">Same file as an earlier upload</span>
+            {% endif %}
+          </td>
+          <td>{{ doc.type_label }}</td>
+          <td><span class="badge badge--{{ doc.status|tone }}">{{ doc.get_status_display }}</span></td>
+          <td class="num">{{ doc.created_at|date:"M j, Y, H:i" }}</td>
+          <td class="num">
+            {% if doc.open_issues %}
+              <span class="badge badge--{% if doc.open_errors %}err{% else %}warn{% endif %}">
+                {{ doc.open_issues }}{% if doc.open_errors %} ({{ doc.open_errors }} error{{ doc.open_errors|pluralize }}){% endif %}
+              </span>
+            {% else %}—{% endif %}
+          </td>
+          <td class="data-table__actions">
+            {% if doc.status != "uploaded" and doc.status != "processing" %}
+              <a class="btn btn--sm" href="{% url 'document_intake:document-review' doc.pk %}">Review</a>
+            {% endif %}
+            <a class="btn btn--sm btn--ghost" href="{% url 'document_intake:file' doc.pk %}?download=1"
+               aria-label="Download {{ doc.original_filename }}">Download</a>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="6">
+            <div class="empty">
+              {% if filtered %}
+                <div class="empty__title">No documents match these filters</div>
+                Clear the filters to see all documents.
+              {% else %}
+                <div class="empty__title">No documents yet</div>
+                Upload a bank statement, card statement, receipt or invoice to get started.
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="panel__footer">
+    <span>
+      {% if page.paginator.count %}{{ page.start_index }}–{{ page.end_index }} of {{ page.paginator.count }}{% endif %}
+      {% if poll %} · updating while files are processed{% endif %}
+    </span>
+    <div class="pager">
+      {# Pager links ask for the same table with another ?page=, and update the address bar. #}
+      {% if page.has_previous %}
+        <a class="btn btn--sm" href="{% querystring page=page.previous_page_number %}"
+           hx-get="{% url 'document_intake:document-list' %}{% querystring page=page.previous_page_number %}"
+           hx-target="#documents" hx-swap="outerHTML" hx-push-url="true">Previous</a>
+      {% endif %}
+      {% if page.has_next %}
+        <a class="btn btn--sm" href="{% querystring page=page.next_page_number %}"
+           hx-get="{% url 'document_intake:document-list' %}{% querystring page=page.next_page_number %}"
+           hx-target="#documents" hx-swap="outerHTML" hx-push-url="true">Next</a>
+      {% endif %}
+    </div>
+  </div>
+</div>

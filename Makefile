@@ -35,9 +35,8 @@ makemigrations: ## Create migrations for document_intake
 test: ## Run the test suite
 	$(UV) run pytest
 
-jstest: ## JS unit tests + syntax check (node, no dependencies, no build)
+jstest: ## Syntax check of our small JS file (htmx does the rest; no build)
 	for f in document_intake/static/document_intake/js/*.js; do node --check $$f || exit 1; done
-	node --test document_intake/tests/js/
 
 cov: ## Run tests with coverage for services/ and validators/
 	$(UV) run pytest --cov=document_intake --cov-report=term-missing

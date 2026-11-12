@@ -16,7 +16,7 @@ Status at the end of delivery step 9. ✅ done and tested · ⚠️ done with a 
 | CSRF on session API; secure cookies, HSTS, SSL redirect in prod | ✅ | `check --deploy` clean (HSTS preload left off on purpose) |
 | CORS locked down | ✅ | no CORS headers are sent; cross-origin calls are blocked by browsers |
 | Content-Security-Policy on intake pages (no inline scripts) | ✅ | CSP test; the login page (host project) has no CSP yet ⚠️ |
-| No `innerHTML` with untrusted data | ✅ | test scans every JS module |
+| No HTML built in JavaScript | ✅ | pages are Django templates (auto-escaped); htmx config disables `eval` and script tags; test scans `upload.js` |
 | CSV formula injection | ✅ | `=HYPERLINK(...)` test |
 | Upload rate limit | ✅ | 60/hour per user, 429 test |
 | Logs carry IDs and statuses only | ✅ | end-to-end test scans every log record; this test found that pdfminer logs document text at DEBUG, now silenced in `apps.py` |
@@ -74,7 +74,7 @@ Status at the end of delivery step 9. ✅ done and tested · ⚠️ done with a 
 
 - Python: pytest, 430+ tests (unit, API, permissions, end-to-end with the provider faked).
   Coverage 99% on `services/` and `validators/` (target was 85%).
-- JavaScript: `node --test` for money and totals arithmetic; every module syntax-checked.
+- JavaScript: only `upload.js` (syntax-checked); totals are computed in Python and unit-tested.
 - Manual: headless Chrome walkthrough (upload, review, edit, approve, export, activity),
   live run against local Ollama, full Docker stack (web, worker, seed).
 

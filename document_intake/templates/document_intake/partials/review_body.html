@@ -1,0 +1,173 @@
+{% load intake_ui %}
+{% comment %}
+  The right-hand side of the review page: details, lines, totals and validation.
+
+  Every edit (a field, a cell, add/remove a row, acknowledge an issue) POSTs with htmx
+  and the server answers with THIS WHOLE PIECE again, already re-validated. So totals,
+  field colours and issues are always the server's truth; there is no maths in JS.
+
+  hx-target / hx-swap are set once here and inherited by every button and input inside.
+  Inputs send on "change" (when you leave the box after changing it).
+{% endcomment %}
+<div class="review__side" id="review-body" hx-target="#review-body" hx-swap="outerHTML">
+
+  {# Every input and button here has an id: after a swap htmx puts the focus back on the same id. #}
+  {% if clear_messages %}<div id="messages" class="stack" aria-live="polite" hx-swap-oob="true"></div>{% endif %}
+
+  {# ------------------------------------------------------------- Details #}
+  <section class="panel" aria-labelledby="fields-title">
+    <div class="panel__header"><h2 class="panel__title" id="fields-title">Details</h2></div>
+    <div class="panel__body"><div class="fields">
+      {% for field in fields %}
+      <div class="field fields__item {% if field.status != 'ok' %}is-{{ field.status }}{% endif %}">
+        <label class="field__label" for="field-{{ field.key }}">
+          {{ field.label }}{% if field.reviewer_enters %}<span class="fields__tag"> · you enter this</span>{% endif %}
+        </label>
+        <input class="input fields__input{% if field.kind == 'money' %} num{% endif %}"
+               id="field-{{ field.key }}" name="value" value="{{ field.value }}" autocomplete="off"
+               {% if field.kind == "date" %}placeholder="YYYY-MM-DD"{% elif field.kind == "money" %}placeholder="0.00" inputmode="decimal"{% endif %}
+               {% if field.status == "error" %}aria-invalid="true"{% endif %}
+               aria-describedby="field-{{ field.key }}-reason"
+               {% if editable %}hx-post="{% url 'document_intake:edit-field' document.pk field.pk %}" hx-trigger="change"{% else %}disabled{% endif %}>
+        <span class="fields__reason{% if field.status != 'ok' %} fields__reason--{{ field.status }}{% endif %}" id="field-{{ field.key }}-reason">
+          {% if field.status == "warning" %}Check: {% elif field.status == "error" %}Error: {% elif field.status == "missing" %}Missing: {% endif %}{% if field.status != "ok" %}{{ field.status_reason|default:"Needs review." }}{% endif %}
+        </span>
+      </div>
+      {% endfor %}
+    </div></div>
+  </section>
+
+  {# --------------------------------------------------------------- Lines #}
+  <section class="panel lines" aria-labelledby="lines-title">
+    <div class="panel__header">
+      <h2 class="panel__title" id="lines-title">{% if statement %}Transactions{% else %}Line items{% endif %}</h2>
+      {% if editable %}
+      <button class="btn btn--sm" type="button" id="add-row" hx-post="{% url 'document_intake:add-line' document.pk %}">Add row</button>
+      {% endif %}
+    </div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th class="lines__no" scope="col">#</th>
+            {% for col in columns %}
+            <th scope="col" class="{% if col.kind == 'money' %}num lines__money{% elif col.kind == 'date' %}lines__date{% endif %}">{{ col.label }}</th>
+            {% endfor %}
+            <th class="lines__state" scope="col"><span class="visually-hidden">Status</span></th>
+            <th class="lines__remove" scope="col"><span class="visually-hidden">Remove</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in lines %}
+          <tr id="line-{{ line.line_no }}" {% if line.status != "ok" %}class="is-{{ line.status }}"{% endif %}>
+            <td class="lines__no">{{ line.line_no }}</td>
+            {% for cell in line.cells %}
+            <td>
+              {# The input's name is the column ("debit", "date"...), so only that column is sent and saved. #}
+              <input class="lines__cell{% if cell.kind == 'money' %} num{% endif %}"
+                     id="cell-{{ line.pk }}-{{ cell.key }}" name="{{ cell.key }}" value="{{ cell.value|plain }}"
+                     autocomplete="off" aria-label="Line {{ line.line_no }} {{ cell.label }}"
+                     {% if cell.kind == "date" %}placeholder="YYYY-MM-DD"{% elif cell.kind == "money" %}inputmode="decimal"{% endif %}
+                     {% if editable %}hx-post="{% url 'document_intake:edit-line' document.pk line.pk %}" hx-trigger="change"{% else %}disabled{% endif %}>
+            </td>
+            {% endfor %}
+            <td class="lines__state">
+              {% if line.status != "ok" %}
+              <span class="lines__flag lines__flag--{{ line.status }}" title="{{ line.status_reason }}"
+                    aria-label="{{ line.get_status_display }}: {{ line.status_reason }}">!</span>
+              {% endif %}
+            </td>
+            <td class="lines__remove">
+              {% if editable %}
+              <button class="btn btn--sm btn--ghost" type="button" id="remove-{{ line.pk }}" aria-label="Remove line {{ line.line_no }}"
+                      hx-post="{% url 'document_intake:delete-line' document.pk line.pk %}"
+                      hx-confirm="Remove line {{ line.line_no }}? It stays in the audit history.">×</button>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="{{ columns|length|add:3 }}">
+            <div class="empty">
+              <div class="empty__title">{% if statement %}No transactions{% else %}No line items{% endif %}</div>
+              {% if editable %}Add rows the model missed with “Add row”.{% endif %}
+            </div>
+          </td></tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          {% if statement %}
+          <tr><td></td><td></td><td>Totals</td>
+            <td class="num">{{ debit_total|money }}</td><td class="num">{{ credit_total|money }}</td>
+            <td></td><td></td><td></td></tr>
+          {% else %}
+          <tr><td></td><td>Totals</td><td class="num">{{ amount_total|money }}</td><td></td><td></td><td></td></tr>
+          {% endif %}
+        </tfoot>
+      </table>
+    </div>
+  </section>
+
+  {# -------------------------------------------------------------- Totals #}
+  <section class="panel" aria-labelledby="totals-title">
+    <div class="panel__header">
+      <h2 class="panel__title" id="totals-title">Totals check</h2>
+      <span class="field__hint">Updates after each saved change</span>
+    </div>
+    <table class="totals"><tbody>
+      {% for row in totals_rows %}
+        {% if row.check %}
+          {% if row.check.ok is None %}
+          <tr><td class="totals__op"></td><th scope="row">{{ row.label }}</th><td class="num">Cannot check</td></tr>
+          {% elif row.check.ok %}
+          <tr class="totals__diff--ok"><td class="totals__op">✓</td><th scope="row">{{ row.label }}</th><td class="num">Matches</td></tr>
+          {% else %}
+          <tr class="totals__diff--bad"><td class="totals__op">≠</td><th scope="row">{{ row.label }}</th><td class="num">Off by {{ row.check.difference|money }}</td></tr>
+          {% endif %}
+        {% else %}
+          <tr {% if row.total %}class="totals__total"{% endif %}>
+            <td class="totals__op">{{ row.op }}</td><th scope="row">{{ row.label }}</th><td class="num">{{ row.value|money }}</td>
+          </tr>
+        {% endif %}
+      {% endfor %}
+    </tbody></table>
+  </section>
+
+  {# ---------------------------------------------------------- Validation #}
+  <section class="panel" aria-labelledby="issues-title">
+    <div class="panel__header">
+      <h2 class="panel__title" id="issues-title">Validation</h2>
+      <span class="field__hint">
+        {% if open_issues %}{{ open_errors }} error{{ open_errors|pluralize }} · {{ open_warnings }} warning{{ open_warnings|pluralize }}{% else %}No open issues{% endif %}
+      </span>
+    </div>
+    <ul class="issues">
+      {% for issue in issues %}
+      <li class="issues__item{% if issue.resolved %} issues__item--resolved{% endif %}">
+        <span class="badge badge--{% if issue.severity == 'error' %}err{% elif issue.severity == 'warning' %}warn{% else %}info{% endif %}">{{ issue.get_severity_display }}</span>
+        {# A plain link jumps to the field or row (#field-total, #line-3). #}
+        <a class="issues__jump" id="jump-{{ issue.pk }}" href="#{{ issue.anchor }}">
+          <span class="issues__where">{{ issue.where }}</span>
+          <span class="issues__message">{{ issue.message }}</span>
+        </a>
+        {% if editable %}
+        <button class="btn btn--sm" type="button" id="resolve-{{ issue.pk }}"
+                hx-post="{% url 'document_intake:resolve-issue' document.pk issue.pk %}"
+                hx-vals='{"resolved": "{% if issue.resolved %}0{% else %}1{% endif %}"}'>{% if issue.resolved %}Reopen{% else %}Acknowledge{% endif %}</button>
+        {% else %}<span></span>{% endif %}
+      </li>
+      {% empty %}
+      <li class="empty">
+        <div class="empty__title">All checks passed</div>
+        Totals and balances are consistent. Review the values against the document.
+      </li>
+      {% endfor %}
+    </ul>
+    {% if editable and open_errors %}
+    {# The Approve button (top bar) sends this checkbox with hx-include="#ack-box". #}
+    <label class="ack">
+      <input type="checkbox" id="ack-box" name="acknowledge_errors">
+      <span>I have checked the {{ open_errors }} open error{{ open_errors|pluralize }} against the document and want to approve anyway.</span>
+    </label>
+    {% endif %}
+  </section>
+</div>
