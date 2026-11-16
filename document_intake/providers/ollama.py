@@ -1,4 +1,12 @@
-"""Ollama HTTP provider: ``POST /api/chat`` with a JSON-schema ``format`` and temperature 0."""
+"""Ollama HTTP provider: ``POST /api/chat`` at temperature 0, answers checked against a schema.
+
+The schema reaches the model in one of two ways (``OLLAMA_SCHEMA_MODE``):
+
+- ``prompt`` (default): written into the user message; the model writes the JSON itself.
+- ``format``: sent as Ollama's ``format``, which constrains every generated token.
+
+Either way the answer is validated with jsonschema before it is used.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +25,9 @@ from document_intake.exceptions import ExtractionError, MalformedModelOutput, Pr
 from .base import ExtractionProvider, ModelRequest, ModelResponse, conform
 
 logger = logging.getLogger(__name__)
+
+SCHEMA_MODES = ("prompt", "format")
+SCHEMA_INSTRUCTION = "Reply with only a JSON object matching this JSON schema:"
 
 
 class OllamaProvider(ExtractionProvider):
@@ -82,19 +93,34 @@ class OllamaProvider(ExtractionProvider):
 
     # ----------------------------------------------------------------- helpers
 
+    @staticmethod
+    def schema_mode() -> str:
+        mode = str(intake_settings.OLLAMA_SCHEMA_MODE).strip().lower()
+        if mode not in SCHEMA_MODES:
+            raise ExtractionError(
+                f"OLLAMA_SCHEMA_MODE must be one of {', '.join(SCHEMA_MODES)}; got '{mode}'."
+            )
+        return mode
+
     def _payload(self, model: str, request: ModelRequest) -> dict[str, Any]:
-        user_message: dict[str, Any] = {"role": "user", "content": request.user}
+        mode = self.schema_mode()
+        user = request.user
+        if mode == "prompt":
+            user = f"{user}\n\n{SCHEMA_INSTRUCTION}\n{json.dumps(request.schema)}"
+        user_message: dict[str, Any] = {"role": "user", "content": user}
         if request.images:
             user_message["images"] = [
                 base64.b64encode(img).decode("ascii") for img in request.images
             ]
-        return {
+        payload: dict[str, Any] = {
             "model": model,
             "stream": False,
-            "format": request.schema,
             "options": {"temperature": 0, "num_ctx": int(intake_settings.OLLAMA_NUM_CTX)},
             "messages": [{"role": "system", "content": request.system}, user_message],
         }
+        if mode == "format":
+            payload["format"] = request.schema
+        return payload
 
     def _post_chat(self, payload: dict[str, Any]) -> str:
         try:
@@ -125,9 +151,22 @@ class OllamaProvider(ExtractionProvider):
         return content
 
     @staticmethod
-    def _parse(content: str, schema: dict[str, Any]) -> dict[str, Any]:
+    def _json_text(content: str) -> str:
+        """The JSON object inside the answer.
+
+        Without constrained decoding a model may wrap the object in prose or a ```json fence;
+        take the outermost braces. Anything else is left for json.loads to reject.
+        """
+        text = content.strip()
+        if text.startswith("{"):
+            return text
+        start, end = text.find("{"), text.rfind("}")
+        return text[start : end + 1] if 0 <= start < end else text
+
+    @classmethod
+    def _parse(cls, content: str, schema: dict[str, Any]) -> dict[str, Any]:
         try:
-            data = json.loads(content)
+            data = json.loads(cls._json_text(content))
         except json.JSONDecodeError as exc:
             raise MalformedModelOutput("The model output is not valid JSON.") from exc
         if not isinstance(data, dict):

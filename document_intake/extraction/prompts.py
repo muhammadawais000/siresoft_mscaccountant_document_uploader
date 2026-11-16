@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from document_intake.models import DocType
 
-PROMPT_VERSION = "2026-11-16.1"
+PROMPT_VERSION = "2026-11-16.2"
 
 SYSTEM_PROMPT = """You extract data from Canadian accounting documents for a bookkeeper.
 Rules:

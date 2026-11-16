@@ -47,6 +47,7 @@ Status at the end of delivery step 9. ✅ done and tested · ⚠️ done with a 
 | Idempotent task, retries with backoff, `failed` dead-letter state | ✅ | verified with the Docker worker against an unreachable Ollama |
 | Unreachable Ollama fails fast | ✅ | 10 s connect timeout (was the full 180 s read timeout; found in Docker testing) |
 | Explicit Ollama context window | ✅ | `OLLAMA_NUM_CTX`; Ollama's default would cut long statements |
+| Schema in the prompt, not Ollama `format` | ✅ | On a 5-page, 27-row card statement, `format` returned 2 rows (qwen2.5:7b and gpt-oss:20b alike); the same text with the schema in the message returned 26. Output is still validated with jsonschema. `OLLAMA_SCHEMA_MODE=format` restores the old behaviour |
 | `check_ollama` command | ✅ | `--probe` runs a real request |
 
 ## Performance

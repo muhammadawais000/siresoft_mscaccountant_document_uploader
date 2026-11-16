@@ -33,6 +33,10 @@ DEFAULTS: dict[str, Any] = {
     # Context window requested from Ollama. Its own default is small and would silently
     # cut long statements, so we always set it explicitly.
     "OLLAMA_NUM_CTX": 16384,
+    # How the JSON schema reaches the model. "prompt": written into the user message and
+    # checked afterwards. "format": Ollama's constrained decoding. With "format", models
+    # closed the transactions list early on long statements (2 of 27 rows), so it is opt-in.
+    "OLLAMA_SCHEMA_MODE": "prompt",
     # In-call retries for transport errors / malformed JSON before the task-level retry.
     "OLLAMA_MAX_RETRIES": 2,
     "OLLAMA_RETRY_BACKOFF_SECONDS": 2.0,

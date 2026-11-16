@@ -5,12 +5,13 @@ import json
 
 import httpx
 import pytest
+from django.conf import settings
 from django.test import override_settings
 
 from document_intake.exceptions import ExtractionError, MalformedModelOutput, ProviderUnavailable
 from document_intake.extraction.schemas import RECEIPT_INVOICE_SCHEMA
 from document_intake.providers.base import ModelRequest, conform, get_provider
-from document_intake.providers.ollama import OllamaProvider
+from document_intake.providers.ollama import SCHEMA_INSTRUCTION, OllamaProvider
 
 SCHEMA = {
     "type": "object",
@@ -39,6 +40,12 @@ def request(**kwargs) -> ModelRequest:
     return ModelRequest(system="sys", user="usr", schema=SCHEMA, **kwargs)
 
 
+def schema_mode(mode: str):
+    return override_settings(
+        DOCUMENT_INTAKE={**settings.DOCUMENT_INTAKE, "OLLAMA_SCHEMA_MODE": mode}
+    )
+
+
 def test_success_payload_and_result() -> None:
     provider, seen = make_provider(lambda r: chat_reply('{"vendor": "Costco", "total": "1.00"}'))
     response = provider.complete_json(request(images=(b"PNGDATA",), vision=True))
@@ -49,11 +56,51 @@ def test_success_payload_and_result() -> None:
     assert seen[0].url.path == "/api/chat"
     assert body["model"] == "test-vision-model"
     assert body["stream"] is False
-    assert body["format"] == SCHEMA
     assert body["options"]["temperature"] == 0
     assert body["options"]["num_ctx"] > 2048
     assert body["messages"][0] == {"role": "system", "content": "sys"}
     assert body["messages"][1]["images"] == [base64.b64encode(b"PNGDATA").decode()]
+
+
+def test_prompt_mode_writes_schema_into_message() -> None:
+    """Default: no constrained decoding; the schema is in the user message instead."""
+    provider, seen = make_provider(lambda r: chat_reply('{"vendor": "A", "total": "1.00"}'))
+    provider.complete_json(request())
+    body = json.loads(seen[0].content)
+    assert "format" not in body
+    user = body["messages"][1]["content"]
+    assert user.startswith("usr\n\n" + SCHEMA_INSTRUCTION)
+    assert json.loads(user.split(SCHEMA_INSTRUCTION, 1)[1]) == SCHEMA
+
+
+def test_format_mode_sends_schema_as_format() -> None:
+    with schema_mode("format"):
+        provider, seen = make_provider(lambda r: chat_reply('{"vendor": "A", "total": "1.00"}'))
+        provider.complete_json(request())
+    body = json.loads(seen[0].content)
+    assert body["format"] == SCHEMA
+    assert body["messages"][1]["content"] == "usr"
+
+
+def test_unknown_schema_mode_is_a_config_error() -> None:
+    with schema_mode("grammar"):
+        provider, seen = make_provider(lambda r: chat_reply("{}"))
+        with pytest.raises(ExtractionError, match="OLLAMA_SCHEMA_MODE"):
+            provider.complete_json(request())
+    assert seen == []
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '```json\n{"vendor": "A", "total": "1.00"}\n```',
+        'Here is the data:\n{"vendor": "A", "total": "1.00"}\nDone.',
+        '  {"vendor": "A", "total": "1.00"}  ',
+    ],
+)
+def test_json_wrapped_in_text_is_read(content: str) -> None:
+    provider, _ = make_provider(lambda r: chat_reply(content))
+    assert provider.complete_json(request()).data == {"vendor": "A", "total": "1.00"}
 
 
 def test_text_requests_fall_back_to_vision_model() -> None:
