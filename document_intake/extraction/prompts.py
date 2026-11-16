@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from document_intake.models import DocType
 
-PROMPT_VERSION = "2026-11-10.1"
+PROMPT_VERSION = "2026-11-16.1"
 
 SYSTEM_PROMPT = """You extract data from Canadian accounting documents for a bookkeeper.
 Rules:
@@ -18,6 +18,15 @@ Rules:
   Canadian and shows no other currency.
 - Never output full account or card numbers; only the last 4 digits."""
 
+# Statements often list several accounts or cardholders, each with its own subtotals.
+# Small models tend to stop at the first "TOTAL" line, so say plainly that it is not the end.
+STATEMENT_RULES = (
+    " The statement may have several sections, one per account, card or cardholder, each "
+    "ending with its own TOTAL, subtotal or summary lines. Those lines are not the end of the "
+    "statement and are not transactions: keep going and extract the transactions of every "
+    "section on every page, in the order printed."
+)
+
 TASK_PROMPTS: dict[str, str] = {
     DocType.RECEIPT: (
         "This is a receipt. Extract the vendor, date, subtotal, each tax shown "
@@ -30,13 +39,15 @@ TASK_PROMPTS: dict[str, str] = {
     DocType.BANK_STATEMENT: (
         "This is a bank statement. Extract the institution, last 4 digits of the account, the "
         "statement period, opening and closing balance, and every transaction in order. "
-        "Money leaving the account is a debit; money coming in is a credit."
+        "Money leaving the account is a debit; money coming in is a credit." + STATEMENT_RULES
     ),
     DocType.CREDIT_CARD_STATEMENT: (
         "This is a credit card statement. Extract the issuer, last 4 digits of the card, the "
         "statement period, previous balance as opening_balance, new balance as "
         "closing_balance, and every transaction in order. Purchases, fees and interest are "
-        "debits; payments and refunds are credits."
+        "debits; payments, refunds and cashback are credits. On a card statement an amount "
+        "printed with a minus sign (for example $ -613.03) is a credit: put it in credit "
+        "without the minus." + STATEMENT_RULES
     ),
 }
 
