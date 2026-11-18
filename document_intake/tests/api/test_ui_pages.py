@@ -57,6 +57,80 @@ def line(doc, line_no):
     return doc.latest_result().lines.get(line_no=line_no)
 
 
+# ------------------------------------------------------------------- delete
+
+
+def test_delete_one_document(ui_client, user) -> None:
+    doc = DocumentFactory(uploaded_by=user, status=S.NEEDS_REVIEW)
+    response = ui_client.post(url("delete-document", doc), **HTMX)
+    assert response.status_code == 200
+    assert response["HX-Trigger"] == "documents-changed"
+    assert response["HX-Retarget"] == "#messages"
+    assert "Deleted" in response.content.decode()
+    assert not Document.objects.filter(pk=doc.pk).exists()
+    gone = Document.all_objects.get(pk=doc.pk)
+    assert gone.deleted_by == user
+    assert AuditLog.objects.filter(document=doc, action=AuditAction.DELETE).exists()
+    assert doc.original_filename not in ui_client.get(LIST, **HTMX).content.decode()
+
+
+def test_delete_from_review_page_goes_back_to_list(ui_client, user) -> None:
+    doc = DocumentFactory(uploaded_by=user, status=S.FAILED)
+    response = ui_client.post(url("delete-document", doc), {"next": "list"}, **HTMX)
+    assert response.status_code == 204
+    assert response["HX-Redirect"] == LIST
+
+
+@pytest.mark.parametrize("status", [S.UPLOADED, S.PROCESSING, S.APPROVED, S.EXPORTED])
+def test_delete_blocked_for_in_progress_and_booked(ui_client, user, status) -> None:
+    doc = DocumentFactory(uploaded_by=user, status=status)
+    response = ui_client.post(url("delete-document", doc), **HTMX)
+    assert "cannot be deleted" in response.content.decode()
+    assert "HX-Trigger" not in response
+    assert Document.objects.filter(pk=doc.pk).exists()
+
+
+def test_delete_other_users_document_is_404(ui_client, other_user) -> None:
+    doc = DocumentFactory(uploaded_by=other_user, status=S.NEEDS_REVIEW)
+    assert ui_client.post(url("delete-document", doc), **HTMX).status_code == 404
+    assert Document.objects.filter(pk=doc.pk).exists()
+
+
+def test_delete_needs_post(ui_client, user) -> None:
+    doc = DocumentFactory(uploaded_by=user, status=S.NEEDS_REVIEW)
+    assert ui_client.get(url("delete-document", doc)).status_code == 405
+
+
+def test_bulk_delete(ui_client, user, other_user) -> None:
+    mine = [DocumentFactory(uploaded_by=user, status=S.NEEDS_REVIEW) for _ in range(2)]
+    approved = DocumentFactory(uploaded_by=user, status=S.APPROVED)
+    theirs = DocumentFactory(uploaded_by=other_user, status=S.NEEDS_REVIEW)
+    ids = [str(d.pk) for d in [*mine, approved, theirs]] + ["not-a-uuid"]
+    response = ui_client.post(reverse("document_intake:delete-documents"), {"ids": ids}, **HTMX)
+    text = response.content.decode()
+    assert "Deleted 2 documents" in text
+    assert "cannot be deleted" in text
+    assert "notice--warn" in text
+    assert response["HX-Trigger"] == "documents-changed"
+    assert not Document.objects.filter(pk__in=[d.pk for d in mine]).exists()
+    assert Document.objects.filter(pk__in=[approved.pk, theirs.pk]).count() == 2
+
+
+def test_bulk_delete_without_selection(ui_client) -> None:
+    response = ui_client.post(reverse("document_intake:delete-documents"), {}, **HTMX)
+    assert "Select at least one" in response.content.decode()
+
+
+def test_list_shows_delete_controls_only_for_deletable_rows(ui_client, user) -> None:
+    deletable = DocumentFactory(uploaded_by=user, status=S.NEEDS_REVIEW)
+    booked = DocumentFactory(uploaded_by=user, status=S.APPROVED)
+    html = ui_client.get(LIST).content.decode()
+    assert url("delete-document", deletable) in html
+    assert url("delete-document", booked) not in html
+    assert 'id="bulk-delete"' in html
+    assert 'id="confirm-dialog"' in html
+
+
 # ------------------------------------------------------------------- login
 
 
@@ -304,7 +378,9 @@ def test_client_sees_review_page_without_controls(ui_client, user) -> None:
     html = ui_client.get(url("document-review", doc)).content.decode()
     assert "Your accounting firm reviews and approves it" in html
     assert 'id="field-closing_balance"' in html  # the data is shown...
-    assert "hx-post=" not in html  # ...but nothing can be changed
+    # ...but nothing can be changed. Deleting their own upload is the only action.
+    assert html.count("hx-post=") == 1
+    assert url("delete-document", doc) in html
     for name in ("Approve", "Reject", "Export CSV", "Add row", "Acknowledge"):
         assert f">{name}<" not in html
 
@@ -446,6 +522,8 @@ def test_line_form_rejects_negative_debit() -> None:
         "document_intake/css/components.css",
         "document_intake/css/review.css",
         "document_intake/js/upload.js",
+        "document_intake/js/ui.js",
+        "document_intake/js/list.js",
         "document_intake/vendor/htmx.min.js",
     ],
 )
@@ -461,8 +539,9 @@ def test_no_external_requests_in_assets() -> None:
             assert needle not in content, (name, needle)
 
 
-def test_our_js_never_writes_html() -> None:
-    js = pathlib.Path(finders.find("document_intake/js/upload.js")).read_text()
+@pytest.mark.parametrize("name", ["upload", "ui", "list"])
+def test_our_js_never_writes_html(name) -> None:
+    js = pathlib.Path(finders.find(f"document_intake/js/{name}.js")).read_text()
     for needle in ("innerHTML", "insertAdjacentHTML", "document.write", "eval("):
         assert needle not in js
 
@@ -500,7 +579,7 @@ def test_our_js_never_writes_html() -> None:
         ("download", {"disposition": "attachment"}, "Downloaded the original"),
         ("export", {"rows": 4, "version": 1}, "Exported CSV (4 rows, version 1)"),
         ("reprocess", {}, "Requested a new extraction"),
-        ("delete", {}, "delete"),
+        ("delete", {}, "Deleted the document"),
     ],
 )
 def test_activity_sentences(action, metadata, expected) -> None:

@@ -1,1 +1,4 @@
-<div class="notice notice--{{ tone }}" role="alert">{{ text }}</div>
+<div class="notice notice--{{ tone }} notice--dismissible" role="{% if tone == 'err' %}alert{% else %}status{% endif %}"{% if tone == 'ok' %} data-autoclose{% endif %}>
+  <span class="notice__text">{{ text }}</span>
+  <button class="notice__close" type="button" data-dismiss aria-label="Dismiss message">×</button>
+</div>

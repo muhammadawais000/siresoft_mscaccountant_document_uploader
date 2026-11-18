@@ -80,4 +80,6 @@ def describe(entry: AuditLog) -> str:
         return f"Exported CSV ({m.get('rows')} rows, version {m.get('version')})"
     if action == "reprocess":
         return "Requested a new extraction"
+    if action == "delete":
+        return "Deleted the document"
     return str(action)

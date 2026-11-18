@@ -182,3 +182,26 @@ def _enqueue(document: Document) -> None:
     from document_intake.tasks import extract_document
 
     extract_document.delay(str(document.id))
+
+
+# Statuses a document may be deleted from. Not while extraction runs (the worker still
+# holds it), and never once approved or exported: those figures are already in the books.
+DELETABLE = frozenset({S.NEEDS_REVIEW, S.NEEDS_CLARIFICATION, S.REJECTED, S.DUPLICATE, S.FAILED})
+
+
+def can_delete(status: str) -> bool:
+    return status in DELETABLE
+
+
+def delete_document(document: Document, actor: Any) -> None:
+    """Soft delete: the row, file and audit trail stay; the document leaves every list."""
+    with transaction.atomic():
+        locked: Document = Document.objects.select_for_update().get(pk=document.pk)
+        if not can_delete(locked.status):
+            raise InvalidTransition(
+                f"“{locked.original_filename}” cannot be deleted while it is "
+                f"{locked.get_status_display().lower()}."
+            )
+        locked.soft_delete(actor if getattr(actor, "is_authenticated", False) else None)
+        audit.record(AuditAction.DELETE, locked, actor, status=locked.status)
+    logger.info("document deleted", extra={"document_id": str(locked.id)})

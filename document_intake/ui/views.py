@@ -16,6 +16,7 @@ React portal). These pages do not use it.
 from __future__ import annotations
 
 import functools
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -168,6 +169,13 @@ def show_message(request: HttpRequest, text: str, tone: str = "err") -> HttpResp
     return response
 
 
+def show_and_refresh_list(request: HttpRequest, text: str, tone: str) -> HttpResponse:
+    """A message for #messages, and tell the documents table to reload itself."""
+    response = show_message(request, text, tone)
+    response["HX-Trigger"] = "documents-changed"
+    return response
+
+
 def refresh_page() -> HttpResponse:
     """Tell HTMX to reload the whole page (used after a status change)."""
     response = HttpResponse(status=204)
@@ -190,6 +198,7 @@ def document_list(request: HttpRequest) -> HttpResponse:
     type_labels = dict(DocType.choices)
     for doc in page:
         doc.type_label = type_labels.get(doc.effective_doc_type or doc.doc_type, "")  # type: ignore[attr-defined]
+        doc.can_delete = lifecycle.can_delete(doc.status)  # type: ignore[attr-defined]
     context = {
         "page": page,
         "form": form,
@@ -247,6 +256,61 @@ def upload_documents(request: HttpRequest) -> HttpResponse:
     # The documents table listens for this event and reloads itself.
     response["HX-Trigger"] = "documents-changed"
     return response
+
+
+MAX_BULK_DELETE = 100
+
+
+@intake_view
+@require_POST
+def delete_document(request: HttpRequest, pk: Any) -> HttpResponse:
+    """Delete one document. From the review page, go back to the list afterwards."""
+    document = get_document(request, pk)
+    try:
+        lifecycle.delete_document(document, request.user)
+    except IntakeError as exc:
+        return show_message(request, str(exc))
+    if request.POST.get("next") == "list":
+        response = HttpResponse(status=204)
+        response["HX-Redirect"] = reverse("document_intake:document-list")
+        return response
+    return show_and_refresh_list(request, f"Deleted “{document.original_filename}”.", "ok")
+
+
+def _uuids(values: list[str]) -> list[uuid.UUID]:
+    ids = []
+    for value in values[:MAX_BULK_DELETE]:
+        try:
+            ids.append(uuid.UUID(value))
+        except ValueError:
+            continue
+    return ids
+
+
+@intake_view
+@require_POST
+def delete_documents(request: HttpRequest) -> HttpResponse:
+    """Delete the ticked documents. Each one is checked and deleted on its own."""
+    ids = _uuids(request.POST.getlist("ids"))
+    if not ids:
+        return show_message(request, "Select at least one document to delete.", "warn")
+    documents = access.visible_documents(request.user).filter(pk__in=ids)
+    deleted, problems = 0, []
+    for document in documents:
+        if not is_allowed(request, document):
+            problems.append(f"“{document.original_filename}”: not allowed.")
+            continue
+        try:
+            lifecycle.delete_document(document, request.user)
+        except IntakeError as exc:
+            problems.append(str(exc))
+            continue
+        deleted += 1
+    text = f"Deleted {deleted} document{'s' if deleted != 1 else ''}."
+    if problems:
+        text += " Not deleted: " + " ".join(problems)
+    tone = "ok" if not problems else ("warn" if deleted else "err")
+    return show_and_refresh_list(request, text, tone)
 
 
 # -------------------------------------------------------------------- review page
@@ -360,6 +424,7 @@ def document_review(request: HttpRequest, pk: Any) -> HttpResponse:
             can_reject=can_review and document.status in CAN_REJECT,
             can_reprocess=can_review and document.status in CAN_REJECT,
             can_export=can_review and document.status in export.EXPORTABLE,
+            can_delete=lifecycle.can_delete(document.status),
         )
     )
     return render(request, "document_intake/document_review.html", context)

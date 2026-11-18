@@ -1,7 +1,8 @@
 {# One line per uploaded file. The table reloads itself (HX-Trigger: documents-changed). #}
 {% for item in results %}
-<li class="queue__item">
-  <span class="queue__name">{{ item.name }}</span>
-  <span class="{% if item.ok %}queue__message--ok{% else %}queue__message--error{% endif %}">{{ item.text }}</span>
+<li class="queue__item queue__item--{% if item.ok %}ok{% else %}error{% endif %}">
+  <span class="queue__icon" aria-hidden="true"></span>
+  <span class="queue__name" title="{{ item.name }}">{{ item.name|default:"—" }}</span>
+  <span class="queue__message {% if item.ok %}queue__message--ok{% else %}queue__message--error{% endif %}">{{ item.text }}</span>
 </li>
 {% endfor %}

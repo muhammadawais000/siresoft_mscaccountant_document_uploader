@@ -58,6 +58,7 @@
   padding: var(--sp-2) var(--sp-4);
   border-left: 3px solid transparent;
   color: var(--c-nav-muted);
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
 }
 
 .sidebar__link:hover {

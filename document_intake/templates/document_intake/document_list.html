@@ -21,6 +21,7 @@
           hx-indicator="#upload-progress">
       <div class="upload">
         <div class="dropzone" data-dropzone>
+          <span class="dropzone__icon" aria-hidden="true"></span>
           <div class="dropzone__title">Drag files here</div>
           <div class="dropzone__actions">
             <label class="btn" for="file-input">Choose files</label>
@@ -45,7 +46,7 @@
       </div>
       <progress id="upload-progress" class="progress htmx-indicator" max="100" value="0"
                 aria-label="Upload progress"></progress>
-      <ul class="queue" id="upload-results" aria-live="polite"></ul>
+      <ul class="queue" id="upload-results" aria-live="polite" aria-label="Upload results"></ul>
     </form>
   </section>
 
@@ -101,6 +102,17 @@
       <a class="btn btn--ghost" href="{% url 'document_intake:document-list' %}">Clear</a>
     </form>
 
+    {# Shown by list.js while at least one row is ticked. The ticked boxes are sent as "ids". #}
+    <div class="bulkbar" id="bulkbar" hidden>
+      <span class="bulkbar__count" id="bulkbar-count" aria-live="polite">0 selected</span>
+      <button class="btn btn--sm btn--ghost" type="button" data-clear-selection>Clear selection</button>
+      <button class="btn btn--sm btn--danger" type="button" id="bulk-delete"
+              hx-post="{% url 'document_intake:delete-documents' %}"
+              hx-include="[data-select-row]:checked"
+              hx-confirm="Delete the selected documents? They disappear from the list; the audit trail keeps a record."
+              data-confirm-action="Delete">Delete selected</button>
+    </div>
+
     {% include "document_intake/partials/documents_table.html" %}
   </section>
 </div>
@@ -108,4 +120,5 @@
 
 {% block scripts %}
 <script src="{% static 'document_intake/js/upload.js' %}"></script>
+<script src="{% static 'document_intake/js/list.js' %}"></script>
 {% endblock %}

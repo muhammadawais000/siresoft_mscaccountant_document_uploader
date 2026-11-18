@@ -16,6 +16,11 @@
       <caption class="visually-hidden">Uploaded documents</caption>
       <thead>
         <tr>
+          <th scope="col" class="data-table__check">
+            <input class="check" type="checkbox" data-select-all
+                   aria-label="Select all deletable documents on this page"
+                   {% if not page.object_list %}disabled{% endif %}>
+          </th>
           <th scope="col">File</th>
           <th scope="col">Type</th>
           <th scope="col">Status</th>
@@ -26,7 +31,17 @@
       </thead>
       <tbody>
         {% for doc in page %}
-        <tr>
+        <tr class="data-table__row" data-row="{{ doc.pk }}">
+          <td class="data-table__check">
+            {% if doc.can_delete %}
+            <input class="check" type="checkbox" name="ids" value="{{ doc.pk }}" data-select-row
+                   aria-label="Select {{ doc.original_filename }}">
+            {% else %}
+            <input class="check" type="checkbox" disabled
+                   title="Cannot be deleted while {{ doc.get_status_display|lower }}"
+                   aria-label="{{ doc.original_filename }} cannot be deleted while {{ doc.get_status_display|lower }}">
+            {% endif %}
+          </td>
           <td class="data-table__file">
             {% if doc.status == "uploaded" or doc.status == "processing" %}
               <span title="{{ doc.original_filename }}">{{ doc.original_filename }}</span>
@@ -55,11 +70,20 @@
             {% endif %}
             <a class="btn btn--sm btn--ghost" href="{% url 'document_intake:file' doc.pk %}?download=1"
                aria-label="Download {{ doc.original_filename }}">Download</a>
+            {% if doc.can_delete %}
+            {# The row fades out, then the table reloads (HX-Trigger: documents-changed). #}
+            <button class="btn btn--sm btn--ghost btn--ghost-danger" type="button"
+                    hx-post="{% url 'document_intake:delete-document' doc.pk %}"
+                    hx-confirm="Delete “{{ doc.original_filename }}”? It disappears from the list; the audit trail keeps a record."
+                    data-confirm-action="Delete"
+                    data-removes-row
+                    aria-label="Delete {{ doc.original_filename }}">Delete</button>
+            {% endif %}
           </td>
         </tr>
         {% empty %}
         <tr>
-          <td colspan="6">
+          <td colspan="7">
             <div class="empty">
               {% if filtered %}
                 <div class="empty__title">No documents match these filters</div>

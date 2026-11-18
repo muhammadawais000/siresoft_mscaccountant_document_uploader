@@ -36,6 +36,13 @@
     </div>
   </details>
   {% endif %}
+  {% if can_delete %}
+  <button class="btn btn--danger" type="button"
+          hx-post="{% url 'document_intake:delete-document' document.pk %}"
+          hx-vals='{"next": "list"}'
+          hx-confirm="Delete “{{ document.original_filename }}”? It disappears from the list; the audit trail keeps a record."
+          data-confirm-action="Delete">Delete</button>
+  {% endif %}
   {% if can_export %}
   <a class="btn" href="{% url 'document_intake:export-csv' document.pk %}" download>Export CSV</a>
   {% endif %}

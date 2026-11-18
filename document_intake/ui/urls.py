@@ -12,6 +12,7 @@ urlpatterns = [
     # Documents list
     path("", views.document_list, name="document-list"),
     path("upload/", views.upload_documents, name="upload"),
+    path("documents/delete/", views.delete_documents, name="delete-documents"),
     # Review page and its pieces
     path(doc, views.document_review, name="document-review"),
     path(doc + "status/", views.review_status, name="review-status"),
@@ -33,4 +34,5 @@ urlpatterns = [
     path(doc + "resume-review/", views.resume_review, name="resume-review"),
     path(doc + "mark-duplicate/", views.mark_duplicate, name="mark-duplicate"),
     path(doc + "reprocess/", views.reprocess, name="reprocess"),
+    path(doc + "delete/", views.delete_document, name="delete-document"),
 ]
