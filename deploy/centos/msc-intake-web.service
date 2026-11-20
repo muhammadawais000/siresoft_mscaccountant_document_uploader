@@ -1,0 +1,35 @@
+# Django behind gunicorn, on 127.0.0.1:8000. Nginx in front (see nginx-msc-intake.conf).
+[Unit]
+Description=MSC document intake - web (gunicorn)
+PartOf=msc-intake.target
+# Ordering only: PostgreSQL / Redis may also run on another server.
+After=network-online.target postgresql.service redis.service valkey.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=msc-intake
+Group=msc-intake
+WorkingDirectory=/opt/msc-intake/app
+EnvironmentFile=/etc/msc-intake/intake.env
+ExecStart=/opt/msc-intake/venv/bin/gunicorn config.wsgi:application \
+    --bind ${GUNICORN_BIND} \
+    --workers ${GUNICORN_WORKERS} \
+    --timeout 120 \
+    --access-logfile - \
+    --error-logfile -
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=30
+
+# Hardening: read-only system, writable only where documents are stored.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/msc-intake
+
+[Install]
+WantedBy=msc-intake.target

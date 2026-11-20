@@ -15,10 +15,13 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
 
-SESSION_COOKIE_SECURE = True
+# Only for a first test over plain http (no TLS yet): DJANGO_SECURE_COOKIES=false.
+# Without it the login cookie is never sent back over http and sign-in silently fails.
+SECURE_COOKIES = env.bool("DJANGO_SECURE_COOKIES", default=True)
+SESSION_COOKIE_SECURE = SECURE_COOKIES
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
-CSRF_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = SECURE_COOKIES
 CSRF_COOKIE_SAMESITE = "Lax"
 X_FRAME_OPTIONS = "DENY"
 

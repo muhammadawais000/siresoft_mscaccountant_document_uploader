@@ -96,6 +96,8 @@ page/size guards, tax rate, permission hooks and feature flags.
 
 ## Production notes
 
+- **CentOS / RHEL server with systemd:** see [docs/DEPLOY_CENTOS.md](docs/DEPLOY_CENTOS.md)
+  (`deploy/centos/install.sh` installs web + worker as background services).
 - Use `DJANGO_SETTINGS_MODULE=config.settings.prod` (secure cookies, HSTS, SSL redirect).
   The Docker image runs gunicorn; `docker-compose.yml` is for local development.
 - Put Nginx in front: terminate TLS, set `X-Forwarded-Proto`, and set

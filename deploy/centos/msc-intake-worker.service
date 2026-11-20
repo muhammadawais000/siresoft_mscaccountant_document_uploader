@@ -1,0 +1,31 @@
+# Celery worker: runs the extraction tasks (talks to Ollama).
+[Unit]
+Description=MSC document intake - worker (celery)
+PartOf=msc-intake.target
+After=network-online.target postgresql.service redis.service valkey.service ollama.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=msc-intake
+Group=msc-intake
+WorkingDirectory=/opt/msc-intake/app
+EnvironmentFile=/etc/msc-intake/intake.env
+ExecStart=/opt/msc-intake/venv/bin/celery -A config worker \
+    --loglevel=${LOG_LEVEL} \
+    --concurrency=${CELERY_CONCURRENCY} \
+    --hostname=intake@%H
+Restart=always
+RestartSec=5
+# Let a running extraction finish (acks_late re-queues it if the worker is killed).
+KillSignal=SIGTERM
+TimeoutStopSec=300
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/msc-intake
+
+[Install]
+WantedBy=msc-intake.target

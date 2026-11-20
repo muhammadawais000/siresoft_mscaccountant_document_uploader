@@ -1,0 +1,7 @@
+# Starts and stops the whole app: `systemctl start|stop|restart msc-intake.target`.
+[Unit]
+Description=MSC document intake (web + worker)
+Wants=msc-intake-web.service msc-intake-worker.service
+
+[Install]
+WantedBy=multi-user.target
