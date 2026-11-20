@@ -264,3 +264,26 @@ def test_corrupt_pdf_fails_cleanly() -> None:
     run_task(doc, FakeProvider(RECEIPT))
     assert doc.status == DocumentStatus.FAILED
     assert "cannot be read" in doc.error_message
+
+
+class DeletingProvider(FakeProvider):
+    """Someone deletes the document while the model is still answering."""
+
+    def __init__(self, document, actor) -> None:
+        super().__init__(BANK_STATEMENT)
+        self.document = document
+        self.actor = actor
+
+    def complete_json(self, request):
+        from document_intake.services import lifecycle
+
+        lifecycle.delete_document(self.document, self.actor)
+        return super().complete_json(request)
+
+
+def test_document_deleted_during_extraction_is_discarded(user) -> None:
+    doc = text_pdf_document(uploaded_by=user)
+    assert run_extraction(doc.id, DeletingProvider(doc, user)) is None
+    assert doc.results.count() == 0
+    mark_failed(doc.id, "late failure")  # a later failure report is ignored, no crash
+    assert not AuditLog.objects.filter(document=doc, action=AuditAction.EXTRACT).exists()

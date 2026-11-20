@@ -96,7 +96,14 @@ def classify(provider: ExtractionProvider, prepared: PreparedInput) -> str:
 def _start(document_id: uuid.UUID | str) -> Document | None:
     """Claim the document for processing; None if it is not in a runnable state."""
     with transaction.atomic():
-        document: Document = Document.objects.select_for_update().get(pk=document_id)
+        document: Document | None = (
+            Document.objects.select_for_update().filter(pk=document_id).first()
+        )
+        if document is None:
+            logger.info(
+                "extraction skipped: document deleted", extra={"document_id": str(document_id)}
+            )
+            return None
         if document.status not in RUNNABLE_STATUSES:
             logger.info(
                 "extraction skipped",
@@ -156,13 +163,20 @@ def _store(
     data: dict[str, Any],
     model_name: str,
     duration_ms: int,
-) -> ExtractionResult:
+) -> ExtractionResult | None:
     currency = str(intake_settings.DEFAULT_CURRENCY)
     field_rows = parsing.build_fields(doc_type, data, currency)
     line_rows = parsing.build_lines(doc_type, data)
 
     with transaction.atomic():
-        document = Document.objects.select_for_update().get(pk=document.pk)
+        locked = Document.objects.select_for_update().filter(pk=document.pk).first()
+        if locked is None:
+            # Deleted while the model was working: nothing to store.
+            logger.info(
+                "extraction discarded: document deleted", extra={"document_id": str(document.pk)}
+            )
+            return None
+        document = locked
         last = document.results.aggregate(v=Max("version"))["v"] or 0
         result = ExtractionResult.objects.create(
             document=document,
@@ -245,7 +259,9 @@ def _store(
 
 def mark_failed(document_id: uuid.UUID | str, reason: str) -> None:
     """Dead-letter state: the document needs an operator (fix config, then reprocess)."""
-    document = Document.objects.get(pk=document_id)
+    document = Document.objects.filter(pk=document_id).first()
+    if document is None:  # deleted meanwhile; nothing to mark
+        return
     try:
         with transaction.atomic():
             lifecycle.transition(

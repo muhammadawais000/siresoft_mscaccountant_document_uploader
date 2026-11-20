@@ -74,6 +74,18 @@ def test_delete_one_document(ui_client, user) -> None:
     assert doc.original_filename not in ui_client.get(LIST, **HTMX).content.decode()
 
 
+@pytest.mark.parametrize("status", [S.UPLOADED, S.PROCESSING])
+def test_stuck_document_can_be_deleted_and_worker_skips_it(ui_client, user, status) -> None:
+    doc = DocumentFactory(uploaded_by=user, status=status)
+    html = ui_client.get(LIST).content.decode()
+    assert url("delete-document", doc) in html
+    ui_client.post(url("delete-document", doc), **HTMX)
+    assert not Document.objects.filter(pk=doc.pk).exists()
+    # The queued task arrives later: nothing happens, no error.
+    assert run_extraction(doc.id, FakeProvider(BANK_STATEMENT)) is None
+    assert Document.all_objects.get(pk=doc.pk).results.count() == 0
+
+
 def test_delete_from_review_page_goes_back_to_list(ui_client, user) -> None:
     doc = DocumentFactory(uploaded_by=user, status=S.FAILED)
     response = ui_client.post(url("delete-document", doc), {"next": "list"}, **HTMX)
@@ -81,8 +93,8 @@ def test_delete_from_review_page_goes_back_to_list(ui_client, user) -> None:
     assert response["HX-Redirect"] == LIST
 
 
-@pytest.mark.parametrize("status", [S.UPLOADED, S.PROCESSING, S.APPROVED, S.EXPORTED])
-def test_delete_blocked_for_in_progress_and_booked(ui_client, user, status) -> None:
+@pytest.mark.parametrize("status", [S.APPROVED, S.EXPORTED])
+def test_delete_blocked_once_booked(ui_client, user, status) -> None:
     doc = DocumentFactory(uploaded_by=user, status=status)
     response = ui_client.post(url("delete-document", doc), **HTMX)
     assert "cannot be deleted" in response.content.decode()

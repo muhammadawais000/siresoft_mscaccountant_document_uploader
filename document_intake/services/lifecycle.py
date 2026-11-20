@@ -184,9 +184,20 @@ def _enqueue(document: Document) -> None:
     extract_document.delay(str(document.id))
 
 
-# Statuses a document may be deleted from. Not while extraction runs (the worker still
-# holds it), and never once approved or exported: those figures are already in the books.
-DELETABLE = frozenset({S.NEEDS_REVIEW, S.NEEDS_CLARIFICATION, S.REJECTED, S.DUPLICATE, S.FAILED})
+# Statuses a document may be deleted from: everything except approved and exported,
+# whose figures are already in the books. A queued or processing document may be deleted
+# too (for example when extraction is stuck); the worker then skips or discards it.
+DELETABLE = frozenset(
+    {
+        S.UPLOADED,
+        S.PROCESSING,
+        S.NEEDS_REVIEW,
+        S.NEEDS_CLARIFICATION,
+        S.REJECTED,
+        S.DUPLICATE,
+        S.FAILED,
+    }
+)
 
 
 def can_delete(status: str) -> bool:
