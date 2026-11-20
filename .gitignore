@@ -16,3 +16,4 @@ htmlcov/
 .vscode/
 # Requirement specs and client documents stay out of git
 *.docx
+.env.server

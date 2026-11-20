@@ -1,0 +1,80 @@
+# Server stack: postgres, redis, web (gunicorn), worker (celery).
+# Everything restarts on its own (crash or reboot). Ollama runs on the host with the GPU.
+#
+#   docker compose -f docker-compose.server.yml --env-file .env.server up -d --build
+#   (or: make server-up)
+#
+# Settings: .env.server (copy deploy/server.env.example). Separate from the local
+# docker-compose.yml, which uses runserver and dev settings.
+name: msc-intake-server
+
+x-app: &app
+  build: .
+  image: msc-intake:latest
+  restart: unless-stopped
+  env_file: .env.server
+  environment:
+    DATABASE_URL: postgres://intake:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.server}@db:5432/intake
+    CELERY_BROKER_URL: redis://redis:6379/0
+    CELERY_RESULT_BACKEND: redis://redis:6379/1
+    INTAKE_PRIVATE_STORAGE_ROOT: /app/private_media
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  volumes:
+    - private_media:/app/private_media
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: intake
+      POSTGRES_USER: intake
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.server}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U intake -d intake"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  web:
+    <<: *app
+    # Every line has the same indent, so YAML joins them into one shell command.
+    command:
+      - sh
+      - -c
+      - >-
+        python manage.py migrate --noinput &&
+        python manage.py collectstatic --noinput -v 0 &&
+        exec gunicorn config.wsgi:application --bind 0.0.0.0:8000
+        --workers $${GUNICORN_WORKERS:-3} --timeout 120 --no-control-socket
+        --access-logfile - --error-logfile -
+    ports:
+      - "0.0.0.0:${WEB_PORT:-8003}:8000"
+
+  worker:
+    <<: *app
+    command: celery -A config worker --loglevel=INFO --concurrency=1 --hostname=intake@%h
+    # Let a running extraction finish on stop (acks_late re-queues it otherwise).
+    stop_grace_period: 5m
+
+volumes:
+  pgdata:
+  redisdata:
+  private_media:

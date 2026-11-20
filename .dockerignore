@@ -1,0 +1,14 @@
+# Keep secrets, local data and tooling out of the image.
+.git
+.env
+.env.*
+.venv
+private_media
+staticfiles
+media
+**/__pycache__
+.mypy_cache
+.ruff_cache
+.pytest_cache
+htmlcov
+*.docx

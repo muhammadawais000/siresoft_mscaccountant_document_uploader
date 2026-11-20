@@ -2,7 +2,7 @@
 UV ?= uv
 MANAGE = $(UV) run python manage.py
 
-.PHONY: help install services run worker migrate makemigrations test jstest cov lint format typecheck check seed check-ollama up down
+.PHONY: help install services run worker migrate makemigrations test jstest cov lint format typecheck check seed check-ollama up down server-up server-down server-logs server-ps server-manage
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -59,3 +59,21 @@ seed: ## Create a demo user and sample documents
 
 check-ollama: ## Verify Ollama connectivity and configured models
 	$(MANAGE) check_ollama
+
+# ---------------------------------------------------------------- server (docker)
+SERVER = docker compose -f docker-compose.server.yml --env-file .env.server
+
+server-up: ## Server: build and start (or update) the stack in the background
+	$(SERVER) up -d --build
+
+server-down: ## Server: stop the stack (data volumes are kept)
+	$(SERVER) down
+
+server-logs: ## Server: follow web + worker logs
+	$(SERVER) logs -f --tail=100 web worker
+
+server-ps: ## Server: container status
+	$(SERVER) ps
+
+server-manage: ## Server: manage.py command, e.g. make server-manage cmd=createsuperuser
+	$(SERVER) exec web python manage.py $(cmd)

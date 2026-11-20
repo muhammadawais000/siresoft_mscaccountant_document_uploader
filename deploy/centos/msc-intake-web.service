@@ -16,6 +16,7 @@ ExecStart=/opt/msc-intake/venv/bin/gunicorn config.wsgi:application \
     --bind ${GUNICORN_BIND} \
     --workers ${GUNICORN_WORKERS} \
     --timeout 120 \
+    --no-control-socket \
     --access-logfile - \
     --error-logfile -
 ExecReload=/bin/kill -s HUP $MAINPID

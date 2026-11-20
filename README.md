@@ -96,6 +96,8 @@ page/size guards, tax rate, permission hooks and feature flags.
 
 ## Production notes
 
+- **Server with Docker + GPU Ollama on the host:** see
+  [docs/DEPLOY_DOCKER_SERVER.md](docs/DEPLOY_DOCKER_SERVER.md) (`docker-compose.server.yml`).
 - **CentOS / RHEL server with systemd:** see [docs/DEPLOY_CENTOS.md](docs/DEPLOY_CENTOS.md)
   (`deploy/centos/install.sh` installs web + worker as background services).
 - Use `DJANGO_SETTINGS_MODULE=config.settings.prod` (secure cookies, HSTS, SSL redirect).
