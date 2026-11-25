@@ -56,46 +56,43 @@ BANK_STATEMENT = {
     ],
 }
 
-# Deliberately inconsistent: the closing balance and one running balance do not add up,
-# so the demo shows validation errors.
+
+def _card_row(day: str, description: str, amount: str) -> dict[str, Any]:
+    return {
+        "trans_date": day,
+        "posting_date": day,
+        "transaction_number": None,
+        "auth_number": None,
+        "description": description,
+        "card_last4": "7730",
+        "pre_tax_amount": None,
+        "tax_amount": None,
+        "amount": amount,
+        "amount_raw": amount,
+    }
+
+
+# Deliberately inconsistent: the closing balance does not add up and one date is outside
+# the period, so the demo shows validation errors.
 CARD_STATEMENT = {
-    "institution_name": "Maple Card (demo)",
-    "account_last4": "7730",
-    "statement_period_start": "2026-09-01",
-    "statement_period_end": "2026-09-30",
-    "currency": "CAD",
-    "opening_balance": "1250.40",
-    "closing_balance": "1689.97",
+    "summary": {
+        "institution": "Maple Card (demo)",
+        "card_last4": "7730",
+        "currency": "CAD",
+        "period_start": "2026-09-01",
+        "period_end": "2026-09-30",
+        "previous_balance": "1,250.40",
+        "new_balance": "1,689.97",
+    },
+    "section_totals": [],
     "transactions": [
-        {
-            "date": "2026-09-04",
-            "description": "Office supplies",
-            "debit": "212.43",
-            "credit": None,
-            "balance": "1462.83",
-        },
-        {
-            "date": "2026-09-10",
-            "description": "Payment - thank you",
-            "debit": None,
-            "credit": "1250.40",
-            "balance": "212.43",
-        },
-        {
-            "date": "2026-09-18",
-            "description": "Software subscription",
-            "debit": "56.50",
-            "credit": None,
-            "balance": "286.93",
-        },
-        {
-            "date": "2026-10-03",
-            "description": "Fuel",
-            "debit": "84.12",
-            "credit": None,
-            "balance": "353.05",
-        },
+        _card_row("2026-09-04", "Office supplies", "212.43"),
+        _card_row("2026-09-10", "Payment - thank you", "-1,250.40"),
+        _card_row("2026-09-18", "Software subscription", "56.50"),
+        _card_row("2026-10-03", "Fuel", "84.12"),
     ],
+    "rows_detected_in_text": 4,
+    "rows_returned": 4,
 }
 
 RECEIPT = {

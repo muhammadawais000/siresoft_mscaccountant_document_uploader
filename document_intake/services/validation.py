@@ -15,7 +15,13 @@ from django.utils import timezone
 from document_intake.conf import intake_settings
 from document_intake.extraction import parsing
 from document_intake.extraction.schemas import REVIEWER_KEYS, family
-from document_intake.models import ExtractedField, ExtractedLine, ExtractionResult, ValidationIssue
+from document_intake.models import (
+    DocType,
+    ExtractedField,
+    ExtractedLine,
+    ExtractionResult,
+    ValidationIssue,
+)
 from document_intake.validators import (
     FieldInput,
     Issue,
@@ -24,6 +30,8 @@ from document_intake.validators import (
     derive_statuses,
     validate,
 )
+
+from . import card_statement
 
 IssueKey = tuple[str, str, int | None, str]
 
@@ -61,10 +69,14 @@ def line_input(row: ExtractedLine, doc_type: str) -> LineInput:
         amount=row.amount,
         balance=row.balance,
         tax=row.tax,
+        posting_date=row.posting_date,
     )
-    line.problems = (
-        parsing.statement_line_problems(line) if statement else parsing.item_line_problems(line)
-    )
+    if doc_type == DocType.CREDIT_CARD_STATEMENT:
+        line.problems = parsing.card_line_problems(line)
+    elif statement:
+        line.problems = parsing.statement_line_problems(line)
+    else:
+        line.problems = parsing.item_line_problems(line)
     return line.as_input()
 
 
@@ -80,7 +92,11 @@ def validate_result(result: ExtractionResult) -> list[ValidationIssue]:
     fields = {row.key: field_input(row) for row in field_rows}
     lines = [line_input(row, doc_type) for row in line_rows]
 
-    found = validate(doc_type, fields, lines, rule_config())
+    report = card_statement.build_report(result, field_rows, line_rows)
+    found = validate(doc_type, fields, lines, rule_config(), check_balance=report is None)
+    if report is not None:
+        removed = result.structured_data.get("removed_rows") or []
+        found += card_statement.report_issues(report, removed)
     field_status, line_status = derive_statuses(fields, lines, found, reviewer_keys=REVIEWER_KEYS)
 
     with transaction.atomic():

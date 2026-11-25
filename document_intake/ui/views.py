@@ -54,7 +54,16 @@ from document_intake.models import (
     ExtractionMethod,
     ExtractionResult,
 )
-from document_intake.services import access, audit, export, lifecycle, query, review, upload
+from document_intake.services import (
+    access,
+    audit,
+    card_statement,
+    export,
+    lifecycle,
+    query,
+    review,
+    upload,
+)
 
 from . import activity, totals
 from .forms import ORDERINGS, FieldForm, FilterForm, LineForm
@@ -77,6 +86,20 @@ RECEIPT_COLUMNS = [
     {"key": "amount", "label": "Amount", "kind": "money"},
     {"key": "tax", "label": "Tax", "kind": "money"},
 ]
+
+CARD_COLUMNS = [
+    {"key": "date", "label": "Date", "kind": "date"},
+    {"key": "posting_date", "label": "Posted", "kind": "date"},
+    {"key": "transaction_number", "label": "Transaction #", "kind": "text"},
+    {"key": "description", "label": "Description", "kind": "text"},
+    {"key": "card_last4", "label": "Card", "kind": "text"},
+]
+CARD_TAX_COLUMNS = [
+    {"key": "pre_tax", "label": "Pre-tax", "kind": "money"},
+    {"key": "tax", "label": "Tax", "kind": "money"},
+]
+CARD_CHARGE = {"key": "charge", "label": "Amount", "kind": "money"}
+CARD_PAYMENT = {"key": "payment", "label": "Amount", "kind": "money"}
 
 # Pages load only our own files. htmx is configured (base.html) not to inject styles or
 # evaluate code, so no 'unsafe-inline' or 'unsafe-eval' is needed.
@@ -329,6 +352,51 @@ def _latest_result(document: Document) -> ExtractionResult | None:
     )
 
 
+def card_tables(report: card_statement.CardReport, lines: list[Any]) -> dict[str, Any]:
+    """Debits, Credits and (if any) rows without an amount, ready for the template."""
+    by_id = {str(line.pk): line for line in lines}
+    tax = CARD_TAX_COLUMNS if report.has_tax else []
+    specs = [
+        ("unclassified", "Rows without an amount", report.unclassified, [CARD_CHARGE]),
+        ("debits", "Debits (purchases)", report.debits, [*tax, CARD_CHARGE]),
+        ("credits", "Credits (payments and cashback)", report.credits, [CARD_PAYMENT]),
+    ]
+    tables = []
+    for key, title, rows, extra in specs:
+        if key == "unclassified" and not rows:
+            continue
+        columns = [*CARD_COLUMNS, *extra]
+        entries = []
+        for row in rows:
+            line = by_id[row.id]
+            amount = None if row.amount is None else abs(row.amount)
+            entries.append(
+                {
+                    "line": line,
+                    "cells": [
+                        {
+                            **col,
+                            "value": amount
+                            if col["key"] in ("charge", "payment")
+                            else getattr(line, col["key"]),
+                        }
+                        for col in columns
+                    ],
+                }
+            )
+        totals: list[Any] = []
+        if key == "debits":
+            totals = [report.totals.total_debits]
+            if report.has_tax:
+                totals = [report.totals.total_pretax, report.totals.total_tax, *totals]
+        elif key == "credits":
+            totals = [report.totals.total_credits]
+        tables.append(
+            {"key": key, "title": title, "columns": columns, "rows": entries, "totals": totals}
+        )
+    return {"report": report, "tables": tables, "label_span": len(CARD_COLUMNS) + 1}
+
+
 def review_context(document: Document, *, can_review: bool) -> dict[str, Any]:
     """Everything the review panels need, worked out on the server.
 
@@ -384,6 +452,8 @@ def review_context(document: Document, *, can_review: bool) -> dict[str, Any]:
     else:
         totals_rows = totals.receipt_rows(values, lines)
 
+    report = card_statement.build_report(result, fields, lines)
+    context["card"] = card_tables(report, lines) if report is not None else None
     context.update(
         fields=fields,
         lines=lines,

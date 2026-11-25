@@ -92,6 +92,65 @@ STATEMENT_SCHEMA = _obj(
     }
 )
 
+_PRINTED: dict[str, Any] = {
+    "type": ["string", "null"],
+    "description": "Exactly as printed, with its sign; null if not printed",
+}
+_COUNT: dict[str, Any] = {"type": ["integer", "null"]}
+
+# One page of a credit card statement, copied as printed. Debit/credit, totals and checks
+# are worked out in ``statement_processor``, never by the model.
+CARD_PAGE_SCHEMA = _obj(
+    {
+        "summary": _obj(
+            {
+                "institution": _NULLABLE_STR,
+                "card_last4": _NULLABLE_STR,
+                "currency": _CURRENCY,
+                "statement_date": _DATE,
+                "period_start": _DATE,
+                "period_end": _DATE,
+                "previous_balance": _PRINTED,
+                "new_balance": _PRINTED,
+                "payments": _PRINTED,
+                "payments_and_credits": _PRINTED,
+                "purchases_and_other_charges": _PRINTED,
+                "net_purchases": _PRINTED,
+                "cash_advances": _PRINTED,
+                "interest": _PRINTED,
+                "fees": _PRINTED,
+                "adjustments": _PRINTED,
+                "other_charges": _PRINTED,
+            }
+        ),
+        "section_totals": {
+            "type": "array",
+            "items": _obj(
+                {"card_last4": _NULLABLE_STR, "total_credits": _PRINTED, "total_debits": _PRINTED}
+            ),
+        },
+        "transactions": {
+            "type": "array",
+            "items": _obj(
+                {
+                    "trans_date": _PRINTED,
+                    "posting_date": _PRINTED,
+                    "transaction_number": _NULLABLE_STR,
+                    "auth_number": _NULLABLE_STR,
+                    "description": _NULLABLE_STR,
+                    "card_last4": _NULLABLE_STR,
+                    "pre_tax_amount": _PRINTED,
+                    "tax_amount": _PRINTED,
+                    "amount": _AMOUNT,
+                    "amount_raw": _PRINTED,
+                }
+            ),
+        },
+        "rows_detected_in_text": _COUNT,
+        "rows_returned": _COUNT,
+    }
+)
+
 CLASSIFICATION_SCHEMA = _obj(
     {
         "doc_type": {
@@ -110,7 +169,7 @@ SCHEMA_FOR_TYPE: dict[str, dict[str, Any]] = {
     DocType.RECEIPT: RECEIPT_INVOICE_SCHEMA,
     DocType.INVOICE: RECEIPT_INVOICE_SCHEMA,
     DocType.BANK_STATEMENT: STATEMENT_SCHEMA,
-    DocType.CREDIT_CARD_STATEMENT: STATEMENT_SCHEMA,
+    DocType.CREDIT_CARD_STATEMENT: CARD_PAGE_SCHEMA,
 }
 
 # Header fields shown in the review form, in display order: (key, label).

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+from datetime import date as Date  # noqa: N812 - a field below is called "date"
 from decimal import Decimal
 from enum import StrEnum
 
@@ -63,6 +64,7 @@ class LineInput:
     amount: Decimal | None = None
     balance: Decimal | None = None
     tax: Decimal | None = None
+    posting_date: Date | None = None
     # (severity, message) found while parsing the model's values for this line.
     problems: tuple[tuple[Sev, str], ...] = field(default_factory=tuple)
 

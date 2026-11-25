@@ -63,10 +63,26 @@ class LineForm(forms.Form):
     amount = _money()
     balance = _money()
     tax = _money()
+    posting_date = forms.DateField(required=False)
+    transaction_number = forms.CharField(required=False, max_length=64)
+    card_last4 = forms.RegexField(r"^\d{4}$", required=False)
+    pre_tax = _money()
+    # Card tables: one amount per row, positive in its own table. A minus moves the row to
+    # the other table.
+    charge = _money()
+    payment = _money()
 
     def sent_values(self, sent: Any) -> dict[str, Any]:
         """Cleaned values for the keys present in the request."""
-        return {key: self.cleaned_data[key] for key in self.fields if key in sent}
+        values = {key: self.cleaned_data[key] for key in self.fields if key in sent}
+        for key, factor in (("charge", 1), ("payment", -1)):
+            if key not in values:
+                continue
+            amount = values.pop(key)
+            signed = None if amount is None else amount * factor
+            values["debit"] = signed if signed is not None and signed >= 0 else None
+            values["credit"] = -signed if signed is not None and signed < 0 else None
+        return values
 
     def error_text(self) -> str:
         return " ".join(

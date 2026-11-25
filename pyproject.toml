@@ -20,6 +20,7 @@ dependencies = [
     "python-json-logger>=2.0",
     "gunicorn>=23.0",
     "whitenoise>=6.7",
+    "pydantic>=2.9",
 ]
 
 [dependency-groups]

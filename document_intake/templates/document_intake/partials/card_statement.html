@@ -1,0 +1,106 @@
+{% load intake_ui %}
+{% comment %}
+  Credit card statements: debits, credits, balance and checks (see services/card_statement.py).
+  Each row keeps its place by the sign of its amount: typing a minus moves it to the other table.
+{% endcomment %}
+{% if card.report.status == "needs_review" %}
+<div class="notice notice--err" role="alert" id="card-banner">
+  <strong>Needs review.</strong> Check this statement before you approve it:
+  <ul class="checks__why">{% for text in card.report.warnings %}<li>{{ text }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+{% for table in card.tables %}
+<section class="panel lines lines--card" aria-labelledby="card-{{ table.key }}-title" id="card-{{ table.key }}">
+  <div class="panel__header">
+    <h2 class="panel__title" id="card-{{ table.key }}-title">{{ table.title }}</h2>
+    {% if table.key == "unclassified" %}<span class="field__hint">Enter the amount; use a minus for a payment or refund</span>{% endif %}
+    {% if editable and table.key == "debits" %}
+    <button class="btn btn--sm" type="button" id="add-row" hx-post="{% url 'document_intake:add-line' document.pk %}">Add row</button>
+    {% endif %}
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th class="lines__no" scope="col">#</th>
+          {% for col in table.columns %}
+          <th scope="col" class="{% if col.kind == 'money' %}num lines__money{% elif col.kind == 'date' %}lines__date{% endif %}">{{ col.label }}</th>
+          {% endfor %}
+          <th class="lines__state" scope="col"><span class="visually-hidden">Status</span></th>
+          <th class="lines__remove" scope="col"><span class="visually-hidden">Remove</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in table.rows %}{% with line=row.line %}
+        <tr id="line-{{ line.line_no }}" {% if line.status != "ok" %}class="is-{{ line.status }}"{% endif %}>
+          <td class="lines__no"{% if line.page %} title="Page {{ line.page }}"{% endif %}>{{ line.line_no }}</td>
+          {% for cell in row.cells %}
+          <td>
+            <input class="lines__cell{% if cell.kind == 'money' %} num{% endif %}" data-col="{{ cell.key }}"
+                   id="cell-{{ line.pk }}-{{ cell.key }}" name="{{ cell.key }}" value="{{ cell.value|plain }}"
+                   autocomplete="off" aria-label="Line {{ line.line_no }} {{ cell.label }}"
+                   {% if cell.kind == "date" %}placeholder="YYYY-MM-DD"{% elif cell.kind == "money" %}inputmode="text"{% endif %}
+                   {% if editable %}hx-post="{% url 'document_intake:edit-line' document.pk line.pk %}" hx-trigger="change"{% else %}disabled{% endif %}>
+          </td>
+          {% endfor %}
+          <td class="lines__state">
+            {% if line.status != "ok" %}
+            <span class="lines__flag lines__flag--{{ line.status }}" title="{{ line.status_reason }}"
+                  aria-label="{{ line.get_status_display }}: {{ line.status_reason }}">!</span>
+            {% endif %}
+          </td>
+          <td class="lines__remove">
+            {% if editable %}
+            <button class="btn btn--sm btn--ghost" type="button" id="remove-{{ line.pk }}" aria-label="Remove line {{ line.line_no }}"
+                    hx-post="{% url 'document_intake:delete-line' document.pk line.pk %}"
+                    hx-confirm="Remove line {{ line.line_no }}? It stays in the audit history.">×</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endwith %}{% empty %}
+        <tr><td colspan="{{ table.columns|length|add:3 }}"><div class="empty">No rows</div></td></tr>
+        {% endfor %}
+      </tbody>
+      {% if table.totals %}
+      <tfoot>
+        <tr>
+          <td colspan="{{ card.label_span }}">Total</td>
+          {% for value in table.totals %}<td class="num">{{ value|money }}</td>{% endfor %}
+          <td colspan="2"></td>
+        </tr>
+      </tfoot>
+      {% endif %}
+    </table>
+  </div>
+</section>
+{% endfor %}
+
+{% with balance=card.report.balance %}
+<section class="panel" aria-labelledby="balance-title">
+  <div class="panel__header">
+    <h2 class="panel__title" id="balance-title">Balance</h2>
+    <span class="field__hint">Updates after each saved change</span>
+  </div>
+  <table class="totals"><tbody>
+    <tr><td class="totals__op"></td><th scope="row">Previous balance</th><td class="num">{{ balance.previous|money }}</td></tr>
+    <tr><td class="totals__op">−</td><th scope="row">Total credits</th><td class="num">{{ balance.total_credits|money }}</td></tr>
+    <tr><td class="totals__op">+</td><th scope="row">Total debits</th><td class="num">{{ balance.total_debits|money }}</td></tr>
+    <tr class="totals__total"><td class="totals__op">=</td><th scope="row">Calculated closing balance</th><td class="num">{% if balance.calculated_closing is None %}Cannot calculate{% else %}{{ balance.calculated_closing|money }}{% endif %}</td></tr>
+    <tr><td class="totals__op"></td><th scope="row">Closing balance on statement</th><td class="num">{{ balance.printed_closing|money }}</td></tr>
+  </tbody></table>
+</section>
+{% endwith %}
+
+<section class="panel" aria-labelledby="checks-title">
+  <div class="panel__header"><h2 class="panel__title" id="checks-title">Checks</h2></div>
+  <ul class="checks">
+    {% for check in card.report.checks %}
+    <li class="checks__item checks__item--{% if check.ok %}ok{% elif check.failed %}bad{% else %}na{% endif %}">
+      <span class="checks__mark" aria-hidden="true">{% if check.ok %}✓{% elif check.failed %}⚠{% else %}–{% endif %}</span>
+      <span class="checks__label">{{ check.label }}<span class="visually-hidden">: {% if check.ok %}passed{% elif check.failed %}needs review{% else %}not printed on the statement{% endif %}</span></span>
+      <span class="checks__text">{{ check.message }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</section>

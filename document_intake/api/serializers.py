@@ -16,6 +16,7 @@ from document_intake.models import (
     ExtractionResult,
     ValidationIssue,
 )
+from document_intake.services import card_statement
 
 # ------------------------------------------------------------------ documents
 
@@ -125,6 +126,12 @@ class ExtractedLineSerializer(serializers.ModelSerializer[ExtractedLine]):
             "amount",
             "balance",
             "tax",
+            "posting_date",
+            "transaction_number",
+            "auth_number",
+            "card_last4",
+            "pre_tax",
+            "page",
             "category",
             "status",
             "status_reason",
@@ -178,6 +185,14 @@ class ExtractionResultSerializer(serializers.ModelSerializer[ExtractionResult]):
         )
         read_only_fields = fields
 
+    def to_representation(self, instance: ExtractionResult) -> dict[str, Any]:
+        """Card statements add ``CardReport`` keys; every other result is unchanged."""
+        data: dict[str, Any] = super().to_representation(instance)
+        report = card_statement.build_report(instance, instance.fields.all(), instance.lines.all())
+        if report is not None:
+            data.update(report.as_dict())
+        return data
+
 
 class AuditEntrySerializer(serializers.ModelSerializer[AuditLog]):
     actor = serializers.SerializerMethodField()
@@ -222,6 +237,10 @@ class LineEditSerializer(serializers.Serializer[None]):
     amount = _money()
     balance = _money()
     tax = _money()
+    posting_date = serializers.DateField(required=False, allow_null=True)
+    transaction_number = serializers.CharField(required=False, allow_blank=True, max_length=64)
+    card_last4 = serializers.RegexField(r"^\d{4}$", required=False, allow_blank=True)
+    pre_tax = _money()
     category = serializers.CharField(required=False, allow_blank=True, max_length=128)
 
 

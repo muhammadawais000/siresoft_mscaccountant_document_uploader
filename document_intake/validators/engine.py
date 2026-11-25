@@ -20,12 +20,16 @@ def validate(
     fields: Mapping[str, FieldInput],
     lines: Sequence[LineInput],
     cfg: RuleConfig,
+    *,
+    check_balance: bool = True,
 ) -> list[Issue]:
     """Run every rule for ``doc_type``. Most severe first, then by position."""
     if doc_type == "bank_statement":
         issues = validate_statement(fields, lines, cfg)
     elif doc_type == "credit_card_statement":
-        issues = validate_statement(fields, lines, cfg, credit_card=True)
+        issues = validate_statement(
+            fields, lines, cfg, credit_card=True, check_balance=check_balance
+        )
     elif doc_type in ("receipt", "invoice"):
         issues = validate_receipt(fields, lines, cfg, invoice=doc_type == "invoice")
     else:

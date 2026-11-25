@@ -71,7 +71,13 @@ def conform(data: Any, schema: dict[str, Any]) -> Any:
     """
     if schema.get("type") == "object" and isinstance(data, dict):
         props: dict[str, Any] = schema.get("properties", {})
-        return {key: conform(data.get(key), sub) for key, sub in props.items()}
+        return {
+            # A nested object left out becomes one with every property null.
+            key: conform(
+                {} if sub.get("type") == "object" and data.get(key) is None else data.get(key), sub
+            )
+            for key, sub in props.items()
+        }
     if schema.get("type") == "array" and isinstance(data, list):
         return [conform(item, schema.get("items", {})) for item in data]
     if schema.get("type") == "array" and data is None:

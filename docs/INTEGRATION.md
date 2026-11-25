@@ -128,3 +128,23 @@ UI templates extend `document_intake/base.html`. To use the portal's shell, over
 template in the portal's template directory and keep the `head`, `page_title`, `actions`,
 `content` and `scripts` blocks, the `htmx-config` meta tag, the `hx-headers` CSRF attribute
 on `<body>`, the `#messages` element and the `vendor/htmx.min.js` script.
+
+## Credit card statements in the result response
+
+For `credit_card_statement` results the API adds these keys; every older key keeps its
+meaning (`lines[].amount` is still credit minus debit). Results extracted before this
+format have none of them until the document is reprocessed.
+
+| Key | Meaning |
+|---|---|
+| `status` | `ok`, or `needs_review` when a check fails, cannot run, or a row reads like a payment but is printed as a charge |
+| `debits`, `credits` | rows split by the printed sign only; `amount` is positive in both |
+| `unclassified` | rows without an amount |
+| `totals` | `total_pretax`, `total_tax` (null without a tax column), `total_debits`, `total_credits` |
+| `balance` | `previous` - `total_credits` + `total_debits` = `calculated_closing`, next to `printed_closing` |
+| `checks` | `closing_ok`, `debits_ok`, `credits_ok`, `rows_ok`, `section_ok`: true, false, or null (not printed or not checkable) |
+| `check_details`, `warnings` | what was compared and why a check failed |
+
+A failed check is an error issue, so approval needs `acknowledge_errors`. Amounts are
+decimal strings. `rows_ok` counts rows in the PDF text (BMO, TD and CIBC layouts); scans and
+other layouts give null.

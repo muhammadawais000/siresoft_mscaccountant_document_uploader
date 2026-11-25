@@ -211,6 +211,50 @@
 .totals__diff--ok td,
 .totals__diff--ok th { color: var(--c-ok-ink); }
 
+/* ------------------------------------------------------- Card statement checks */
+.checks { list-style: none; margin: 0; padding: 0; }
+
+.checks__item {
+  display: grid;
+  grid-template-columns: 20px 150px minmax(0, 1fr);
+  gap: var(--sp-3);
+  align-items: start;
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--c-border);
+}
+
+.checks__item:last-child { border-bottom: 0; }
+.checks__mark { font-weight: var(--fw-semibold); text-align: center; }
+.checks__label { font-weight: var(--fw-medium); }
+.checks__text { color: var(--c-ink-muted); overflow-wrap: anywhere; }
+.checks__item--ok .checks__mark { color: var(--c-ok-ink); }
+.checks__item--bad { background: var(--c-err-bg); }
+.checks__item--bad .checks__mark,
+.checks__item--bad .checks__label,
+.checks__item--bad .checks__text { color: var(--c-err-ink); }
+.checks__item--na .checks__mark { color: var(--c-ink-faint); }
+.checks__why { margin: var(--sp-1) 0 0; padding-left: var(--sp-5); }
+
+@media (max-width: 600px) {
+  .checks__item { grid-template-columns: 20px minmax(0, 1fr); }
+  .checks__text { grid-column: 2; }
+}
+
+/* Card tables have up to eight columns: tighter cells, totals always in view. */
+.lines--card .data-table { font-size: var(--fs-sm); }
+.lines--card .lines__date,
+.lines--card .lines__money { width: auto; }
+.lines--card .data-table th { padding: 0 var(--sp-2); letter-spacing: 0; }
+.lines--card .lines__cell { padding: 0 var(--sp-1); }
+.lines--card .lines__cell[data-col="date"],
+.lines--card .lines__cell[data-col="posting_date"] { min-width: 92px; }
+.lines--card .lines__cell[data-col="transaction_number"] { min-width: 78px; }
+.lines--card .lines__cell[data-col="description"] { min-width: 150px; }
+.lines--card .lines__cell[data-col="card_last4"] { min-width: 40px; }
+.lines--card .lines__cell.num { min-width: 66px; }
+.lines--card tfoot td { position: sticky; bottom: 0; }
+.lines--card tfoot td.num { padding-right: var(--sp-2); }
+
 /* ----------------------------------------------------------------- Issues */
 .issues { list-style: none; margin: 0; padding: 0; }
 

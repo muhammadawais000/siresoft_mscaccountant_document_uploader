@@ -30,7 +30,22 @@ from document_intake.models import (
 
 from . import audit, lifecycle, validation
 
-LINE_FIELDS = ("date", "description", "debit", "credit", "amount", "balance", "tax", "category")
+LINE_FIELDS = (
+    "date",
+    "description",
+    "debit",
+    "credit",
+    "amount",
+    "balance",
+    "tax",
+    "category",
+    # Credit card statements
+    "posting_date",
+    "transaction_number",
+    "card_last4",
+    "pre_tax",
+)
+TEXT_FIELDS = ("description", "category", "transaction_number", "card_last4")
 
 
 class NotEditable(InvalidTransition):
@@ -85,7 +100,7 @@ def _apply_line_values(line: ExtractedLine, values: dict[str, Any], statement: b
     for name in LINE_FIELDS:
         if name in values:
             value = values[name]
-            if name in ("description", "category") and value is None:
+            if name in TEXT_FIELDS and value is None:
                 value = ""
             setattr(line, name, value)
     if statement and ("debit" in values or "credit" in values):

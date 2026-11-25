@@ -32,7 +32,7 @@ from document_intake.models import (
 from document_intake.providers.base import ExtractionProvider, ModelRequest, get_provider
 from document_intake.signals import document_extracted
 
-from . import audit, lifecycle, validation
+from . import audit, card_extraction, lifecycle, validation
 
 logger = logging.getLogger(__name__)
 
@@ -138,8 +138,14 @@ def run_extraction(
     if doc_type == DocType.AUTO:
         detected = doc_type = classify(provider, prepared)
 
-    task = prompts.TASK_PROMPTS[doc_type]
-    response = provider.complete_json(_request(prepared, task, schemas.SCHEMA_FOR_TYPE[doc_type]))
+    if doc_type == DocType.CREDIT_CARD_STATEMENT:
+        extracted, model_name = card_extraction.extract_card_statement(provider, prepared)
+    else:
+        task = prompts.TASK_PROMPTS[doc_type]
+        response = provider.complete_json(
+            _request(prepared, task, schemas.SCHEMA_FOR_TYPE[doc_type])
+        )
+        extracted, model_name = response.data, response.model_name
     duration_ms = int((time.monotonic() - started) * 1000)
 
     return _store(
@@ -148,8 +154,8 @@ def run_extraction(
         detected,
         prepared,
         provider,
-        response.data,
-        response.model_name,
+        extracted,
+        model_name,
         duration_ms,
     )
 
@@ -211,6 +217,12 @@ def _store(
                 amount=row.amount,
                 balance=row.balance,
                 tax=row.tax,
+                posting_date=row.posting_date,
+                transaction_number=row.transaction_number,
+                auth_number=row.auth_number,
+                card_last4=row.card_last4,
+                pre_tax=row.pre_tax,
+                page=row.page,
                 raw=row.raw,
             )
             for row in line_rows

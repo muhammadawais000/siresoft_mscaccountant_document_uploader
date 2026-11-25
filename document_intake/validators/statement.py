@@ -102,6 +102,8 @@ def check_running_balance(
 def check_period(
     fields: Mapping[str, FieldInput], lines: Sequence[LineInput], cfg: RuleConfig
 ) -> list[Issue]:
+    """Dates against the period. Card statements are cut by posting date, so a purchase made
+    just before the period but posted inside it is normal."""
     start, end = day(fields, "statement_period_start"), day(fields, "statement_period_end")
     issues = future_date(end, "statement_period_end", cfg.today)
     if start and end and start > end:
@@ -115,9 +117,10 @@ def check_period(
         )
         return issues
     for line in lines:
-        if line.date is None:
+        posted = line.posting_date or line.date
+        if posted is None:
             continue
-        if line.date > cfg.today:
+        if posted > cfg.today or (line.date is not None and line.date > cfg.today):
             issues.append(
                 Issue(
                     "date_in_future",
@@ -126,7 +129,7 @@ def check_period(
                     line_no=line.line_no,
                 )
             )
-        elif (start and line.date < start) or (end and line.date > end):
+        elif (start and posted < start) or (end and posted > end):
             issues.append(
                 Issue(
                     "date_outside_period",
@@ -144,11 +147,16 @@ def validate_statement(
     cfg: RuleConfig,
     *,
     credit_card: bool = False,
+    check_balance: bool = True,
 ) -> list[Issue]:
+    """``check_balance=False``: the caller checks the closing balance itself (card report)."""
+    balance = (
+        check_balance_equation(fields, lines, cfg, credit_card=credit_card) if check_balance else []
+    )
     return [
         *field_problems(fields, REQUIRED),
         *line_problems(lines),
-        *check_balance_equation(fields, lines, cfg, credit_card=credit_card),
+        *balance,
         *check_running_balance(fields, lines, cfg, credit_card=credit_card),
         *check_period(fields, lines, cfg),
     ]

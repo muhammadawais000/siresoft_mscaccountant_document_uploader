@@ -88,6 +88,13 @@ class ExtractedLine(SoftDeleteModel):
     amount = money_field()
     balance = money_field()
     tax = money_field()
+    # Credit card statements only.
+    posting_date = models.DateField(null=True, blank=True)
+    transaction_number = models.CharField(max_length=64, blank=True, default="")
+    auth_number = models.CharField(max_length=64, blank=True, default="")
+    card_last4 = models.CharField(max_length=4, blank=True, default="")
+    pre_tax = money_field()
+    page = models.PositiveSmallIntegerField(null=True, blank=True)
     category = models.CharField(max_length=128, blank=True, default="")
     status = models.CharField(max_length=16, choices=FieldStatus.choices, default=FieldStatus.OK)
     status_reason = models.CharField(max_length=255, blank=True, default="")

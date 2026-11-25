@@ -37,6 +37,9 @@
     </div></div>
   </section>
 
+  {% if card %}
+  {% include "document_intake/partials/card_statement.html" %}
+  {% else %}
   {# --------------------------------------------------------------- Lines #}
   <section class="panel lines" aria-labelledby="lines-title">
     <div class="panel__header">
@@ -131,6 +134,7 @@
       {% endfor %}
     </tbody></table>
   </section>
+  {% endif %}
 
   {# ---------------------------------------------------------- Validation #}
   <section class="panel" aria-labelledby="issues-title">
