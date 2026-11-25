@@ -146,6 +146,38 @@ def test_tables_repeated_by_pdfplumber_are_not_counted() -> None:
     assert sp.count_rows(sp.split_pages(raw)) == 1
 
 
+@pytest.mark.parametrize(
+    ("line", "amounts"),
+    [
+        ("12/04 12/08 SHOP $ 13.26 $ 1.72 (e) $ 14.98", ["13.26", "1.72", "14.98"]),
+        ("12/03 12/04 CASHBACK $ -613.03 $ 0.00 $ -613.03", ["-613.03", "0.00", "-613.03"]),
+        ("OCT14 OCT15 PAYMENT -$2,000.00 CashAdvances $0.00", ["-2000.00", "0.00"]),
+        ("OCT14 OCT15 PAYMENT-THANKYOU-$2,000.00", ["-2000.00"]),
+        ("OCT6 OCT7 STORE905-738-3663 $1,454.92", ["1454.92"]),
+        ("Dec 27 Dec 30 BMW TORONTO -18.00", ["-18.00"]),
+        ("Jan 06 Jan 07 APPLE.COM/BILL 866-712-7753 ON 4.51", ["4.51"]),
+        ("12/05 12/08 HMART - RICHMOND HILL $ 5.49", ["5.49"]),
+        ("Jan 06 Jan 07 REFUND 12.00 CR", ["-12.00"]),
+    ],
+)
+def test_amounts_on_a_printed_line_keep_their_sign(line, amounts) -> None:
+    assert sp.TextRow(1, line, "").amounts == [D(x) for x in amounts]
+
+
+def test_row_not_in_the_text_is_flagged() -> None:
+    answers = {1: {**BMO_PAGES[1], "transactions": [row("12/04", "12/08", "GHOST", "$ 99.99")]}}
+    data = merged(answers, BMO_TEXT)
+    [line] = build_lines("credit_card_statement", data)
+    assert any("not found in the PDF text" in message for _, message in line.problems)
+
+
+def test_purchase_and_its_refund_on_the_same_dates_keep_their_signs() -> None:
+    text = [["Jan 22 Jan 23 EBAY 67.44", "Jan 22 Jan 23 EBAY -67.44"]]
+    items = [row("Jan 22", "Jan 23", "EBAY", "67.44"), row("Jan 22", "Jan 23", "EBAY", "67.44")]
+    data = merged({1: {**BMO_PAGES[2], "transactions": items}}, text)
+    assert [r["text_amount"] for r in data["transactions"]] == ["67.44", "-67.44"]
+
+
 def test_sections_continue_across_pages() -> None:
     layout = sp.read_layout(pages_of(BMO_TEXT))
     assert layout.first_card == {1: "", 2: "3664", 3: "5124", 4: "5124", 5: "5124"}

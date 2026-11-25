@@ -359,9 +359,12 @@ def _card_line(line_no: int, item: dict[str, Any]) -> LineRow:
     )
     line.pre_tax = read("pre_tax_amount", "Pre-tax", parse_printed_amount)
     line.tax = read("tax_amount", "Tax", parse_printed_amount)
-    # The exact printed text decides; the model's own "amount" is only a cross-check.
+    # The signed amount read from the PDF line decides. Without a PDF line (a scan, or a row
+    # not found in the text) the model's copy of the printed text is used.
     printed = read("amount_raw", "Amount", parse_printed_amount, "Amount is missing.")
-    if not item.get("amount_raw"):
+    if item.get("text_amount"):
+        printed = parse_money(item["text_amount"])
+    elif not item.get("amount_raw"):
         printed = read("amount", "Amount", parse_printed_amount, "Amount is missing.")
     elif printed is not None:
         try:
@@ -372,6 +375,10 @@ def _card_line(line_no: int, item: dict[str, Any]) -> LineRow:
             line.problems.append(
                 (Sev.WARNING, f"Read as {other} but printed {item['amount_raw']}; printed used.")
             )
+    if item.get("not_in_text"):
+        line.problems.append(
+            (Sev.WARNING, "This amount was not found in the PDF text; check amount and sign.")
+        )
     set_signed_amount(line, printed)
     line.problems.extend(p for p in card_line_problems(line) if p[1] not in unreadable)
     return line

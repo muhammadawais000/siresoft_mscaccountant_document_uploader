@@ -147,6 +147,12 @@ def build_report(
         f"Removed a line that is not a transaction: {row.get('description') or ''}".strip()
         for row in data.get("removed_rows") or []
     ]
+    corrected = sum(1 for row in data.get("transactions") or [] if row.get("sign_corrected"))
+    if corrected:
+        warnings.append(
+            f"The model got the sign wrong on {corrected} row{'s' if corrected != 1 else ''}; "
+            "the sign printed in the PDF was used."
+        )
     conflicts = [row for row in debits if row.amount and parsing.looks_like_credit(row.description)]
     warnings += [
         f"Line {row.line_no} reads like a payment or refund, but the printed amount is a charge."

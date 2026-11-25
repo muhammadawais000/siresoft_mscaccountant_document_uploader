@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from document_intake.models import DocType
 
-PROMPT_VERSION = "2026-11-26.1"
+PROMPT_VERSION = "2026-11-26.2"
 
 SYSTEM_PROMPT = """You extract data from Canadian accounting documents for a bookkeeper.
 Rules:
@@ -58,6 +58,8 @@ TASK_PROMPTS: dict[str, str] = {
         "- amount_raw: the row's final amount (including tax), exactly as printed with its "
         'sign, for example "-$2,000.00" or "$ -613.03". amount: the same value as a plain '
         'decimal with the same sign, for example "-2000.00".\n'
+        '- Most rows are purchases and have no minus: "$ 14.98" stays "$ 14.98". Write a '
+        "minus only if the minus is printed on that row.\n"
         "- If other text follows the amount on the same line (a side box such as CashAdvances "
         "$0.00), it is not part of the row: use the first amount after the description.\n"
         '- trans_date and posting_date: exactly as printed ("12/03", "OCT6"). Do not add a '

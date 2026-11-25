@@ -247,3 +247,25 @@ def test_older_card_results_keep_the_old_table(staff_client, user) -> None:
 def test_status_stays_needs_review_until_a_person_approves(user) -> None:
     doc, _ = extract(user, "bmo")
     assert doc.status == DocumentStatus.NEEDS_REVIEW
+
+
+def _flip(item):
+    raw = item["amount_raw"]
+    item["amount_raw"] = raw.replace("-", "") if "-" in raw else f"-{raw.replace(' ', '')}"
+    item["amount"] = item["amount_raw"].replace("$", "").replace(",", "").replace(" ", "")
+
+
+@pytest.mark.parametrize(("name", "debits", "credits"), [("bmo", 25, 2), ("td", 33, 7)])
+def test_sign_comes_from_the_pdf_even_if_the_model_gets_it_wrong(
+    auth_client, user, name, debits, credits
+) -> None:
+    def flip_all(pages):
+        for answer in pages.values():
+            for item in answer["transactions"]:
+                _flip(item)
+
+    doc, _ = extract(user, name, flip_all)
+    data = api(auth_client, doc)
+    assert (len(data["debits"]), len(data["credits"])) == (debits, credits)
+    assert data["status"] == "ok", data["warnings"]
+    assert any("sign" in w for w in data["warnings"])

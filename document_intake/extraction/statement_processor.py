@@ -112,11 +112,34 @@ _SUMMARY_WORDS = re.compile(
 )
 
 
+# An amount with its own sign: "$ 14.98", "-$2,000.00", "$ -613.03", "-18.00", "12.00 CR".
+_AMOUNT_TOKEN = re.compile(
+    r"(?<![\d.,])-?\$?\s?-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}(?!\d)(?:\s?CR\b)?", re.I
+)
+
+
 @dataclass(frozen=True)
 class TextRow:
     page: int
     line: str
     card_last4: str  # "" when no card header was printed above it
+
+    @property
+    def amounts(self) -> list[Decimal]:
+        """Every amount on the line, signed as printed."""
+        values = []
+        for token in _AMOUNT_TOKEN.findall(self.line):
+            try:
+                value = parse_printed_amount(token)
+            except ParseError:
+                continue
+            if value is not None:
+                values.append(value)
+        return values
+
+    def starts_with_dates(self, item: PrintedTransaction) -> bool:
+        dates = re.sub(r"\s", "", f"{item.trans_date or ''}{item.posting_date or ''}").upper()
+        return bool(dates) and re.sub(r"\s", "", self.line).upper().startswith(dates)
 
 
 @dataclass(frozen=True)
@@ -249,32 +272,63 @@ def _plain_amount(value: str | None) -> str | None:
     return None if amount is None else str(amount)
 
 
-def _printed_sign_amount(item: Mapping[str, Any]) -> Decimal | None:
+def _model_amount(item: PrintedTransaction) -> Decimal | None:
     try:
-        return parse_printed_amount(item.get("amount_raw") or item.get("amount"))
+        return parse_printed_amount(item.amount_raw or item.amount)
     except ParseError:
         return None
 
 
+def _find_text_row(
+    item: PrintedTransaction, page: int, layout: TextLayout, used: set[int]
+) -> int | None:
+    """The printed line this row was copied from: same size of amount, first unused line.
+
+    The sign is ignored here on purpose, because the model's sign is what we verify. A line
+    with the same dates is preferred over an equal amount elsewhere on the page.
+    """
+    amount = _model_amount(item)
+    if amount is None:
+        return None
+    matches = [
+        i
+        for i, row in enumerate(layout.rows)
+        if row.page == page
+        and i not in used
+        and any(abs(value) == abs(amount) for value in row.amounts)
+    ]
+    dated = [i for i in matches if layout.rows[i].starts_with_dates(item)]
+    return next(iter(dated or matches), None)
+
+
+def _apply_text(
+    row: dict[str, Any], item: PrintedTransaction, text_row: TextRow | None, has_rows: bool
+) -> None:
+    """Take the signed amount from the PDF line itself; note when the model's sign differed."""
+    amount = _model_amount(item)
+    row["text_amount"] = None
+    row["sign_corrected"] = False
+    row["not_in_text"] = has_rows and amount is not None and text_row is None
+    if text_row is None or amount is None:
+        return
+    printed = next(value for value in text_row.amounts if abs(value) == abs(amount))
+    row["text_amount"] = str(printed)
+    row["sign_corrected"] = printed != amount
+
+
 def _card_for(
-    item: PrintedTransaction, page: int, layout: TextLayout, used: set[int], default: str
+    item: PrintedTransaction, page: int, layout: TextLayout, text_row: TextRow | None, default: str
 ) -> str:
     """The card a row belongs to: from the printed sections, else from the model."""
     if not layout.has_sections:
         return last4(item.card_last4) or default
-    amount = _printed_sign_amount(item.model_dump())
-    on_page = [(i, row) for i, row in enumerate(layout.rows) if row.page == page]
-    if amount is not None:
-        needle = re.compile(rf"(?<![\d,]){re.escape(f'{abs(amount):,.2f}')}(?!\d)")
-        for i, row in on_page:
-            if i not in used and needle.search(row.line):
-                used.add(i)
-                return row.card_last4
-    dates = re.sub(r"\s", "", f"{item.trans_date or ''}{item.posting_date or ''}").upper()
-    for _, row in on_page:
-        if dates and re.sub(r"\s", "", row.line).upper().startswith(dates):
-            return row.card_last4
-    cards = {row.card_last4 for _, row in on_page}
+    if text_row is not None:
+        return text_row.card_last4
+    on_page = [row for row in layout.rows if row.page == page]
+    for candidate in on_page:
+        if candidate.starts_with_dates(item):
+            return candidate.card_last4
+    cards = {candidate.card_last4 for candidate in on_page}
     return cards.pop() if len(cards) == 1 else last4(item.card_last4)
 
 
@@ -311,7 +365,13 @@ def merge_pages(answers: Sequence[tuple[int, PrintedPage]], pages: Sequence[str]
             if is_non_transaction(item.description or "", dated=dated):
                 removed.append(row)
                 continue
-            row["card_last4"] = _card_for(item, page, layout, used, summary["card_last4"] or "")
+            index = _find_text_row(item, page, layout, used)
+            text_row = None
+            if index is not None:
+                used.add(index)
+                text_row = layout.rows[index]
+            _apply_text(row, item, text_row, bool(layout.rows))
+            row["card_last4"] = _card_for(item, page, layout, text_row, summary["card_last4"] or "")
             transactions.append(row)
 
     if layout.footers:
