@@ -1,6 +1,7 @@
 """Card statements end to end: PDF -> per-page answers -> report, API, page and edits."""
 
 import copy
+import re
 from decimal import Decimal
 
 import pytest
@@ -8,6 +9,7 @@ from django.test import Client
 from django.urls import reverse
 
 from document_intake.exceptions import MalformedModelOutput
+from document_intake.extraction import statement_processor as sp
 from document_intake.models import DocType, DocumentStatus
 from document_intake.services import lifecycle
 from document_intake.services.extraction import run_extraction
@@ -29,12 +31,14 @@ TEXT = {"bmo": BMO_TEXT, "td": TD_TEXT}
 PAGES = {"bmo": BMO_PAGES, "td": TD_PAGES}
 
 
-def extract(user, name, change=None, missed=None):
+def extract(user, name, change=None, missed=None, text=None):
     pages = copy.deepcopy(PAGES[name])
     if change:
         change(pages)
     doc = DocumentFactory(
-        uploaded_by=user, content=make_pdf(TEXT[name]), doc_type=DocType.CREDIT_CARD_STATEMENT
+        uploaded_by=user,
+        content=make_pdf(text or TEXT[name]),
+        doc_type=DocType.CREDIT_CARD_STATEMENT,
     )
     provider = PageProvider(pages, missed)
     run_extraction(doc.id, provider)
@@ -322,10 +326,23 @@ def test_td_dates_and_period_from_the_text(auth_client, user) -> None:
 
 
 def test_amount_the_pdf_does_not_print_is_flagged(auth_client, user) -> None:
-    def misread(pages):
-        pages[1]["summary"]["fees"] = "$ 12.34"  # the TD sample text prints no fees line
+    """A layout whose summary labels are not recognised: the model's numbers are used,
+    and one the PDF does not print is flagged."""
+    side = re.compile(r" (?:PreviousBalance|CashAdvances) \$[\d,.]+$")
+    labels = ("PREVIOUSSTATEMENTBALANCE", "Payments&", "Purchases&", "NEWBALANCE", "TOTALNEW")
+    text = [
+        [side.sub("", line) for line in lines if not line.startswith(labels)] for lines in TD_TEXT
+    ]
+    assert not sp.read_summary(["\n".join(lines) for lines in text]).keys() - {
+        "statement_date",
+        "period_start",
+        "period_end",
+    }
 
-    doc, _ = extract(user, "td", misread)
+    def misread(pages):
+        pages[1]["summary"]["fees"] = "$ 12.34"
+
+    doc, _ = extract(user, "td", misread, text=text)
     data = api(auth_client, doc)
     assert data["status"] == "needs_review"
     assert any("12.34 is not printed anywhere in the PDF" in w for w in data["warnings"])
@@ -344,3 +361,18 @@ def test_pre_tax_and_tax_come_from_the_pdf_line(auth_client, user) -> None:
     assert data["totals"]["total_pretax"] == "6184.43"
     assert data["totals"]["total_tax"] == "803.98"
     assert all(row["tax"] is not None for row in data["debits"])
+
+
+def test_model_summary_in_the_wrong_box_is_not_used(auth_client, user) -> None:
+    """Seen with qwen2.5:7b: BMO's TOTAL CREDITS came back as "payments and credits"
+    (BMO prints no such label), and the check expected 7,909.29."""
+
+    def wrong_box(pages):
+        pages[1]["summary"]["payments_and_credits"] = "$ -7,296.26"
+
+    doc, _ = extract(user, "bmo", wrong_box)
+    data = api(auth_client, doc)
+    assert data["checks"]["credits_ok"] is True, data["warnings"]
+    assert data["status"] == "ok"
+    detail = next(c for c in data["check_details"] if c["code"] == "credits_ok")
+    assert "Payments 6,683.23 + Cash advance 613.03 = 7,296.26" in detail["message"]

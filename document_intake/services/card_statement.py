@@ -108,9 +108,18 @@ _SUMMARY_AMOUNTS = (
 )
 
 
-def _summary(raw: Mapping[str, Any], warnings: list[str]) -> dict[str, Decimal | None]:
+def _summary(
+    raw: Mapping[str, Any], from_text: Iterable[str], warnings: list[str]
+) -> dict[str, Decimal | None]:
+    """Printed summary amounts. When the PDF's own summary could be read by its labels,
+    only those are used: the model may put a number in the wrong box (seen: BMO's TOTAL
+    CREDITS given as "payments and credits", a label BMO does not print)."""
+    read = set(from_text) & set(_SUMMARY_AMOUNTS)
     values: dict[str, Decimal | None] = {}
     for key in _SUMMARY_AMOUNTS:
+        if read and key not in read:
+            values[key] = None
+            continue
         try:
             values[key] = parsing.parse_printed_amount(raw.get(key))
         except parsing.ParseError:
@@ -138,7 +147,7 @@ def build_report(
         rows,
         previous=previous,
         printed_closing=printed,
-        summary=_summary(data["summary"] or {}, warnings),
+        summary=_summary(data["summary"] or {}, data.get("summary_from_text") or [], warnings),
         sections=data.get("section_totals") or [],
         text_rows=processor.count_rows(pages),
     )
@@ -161,7 +170,7 @@ def build_report(
     ]
     unverified = [
         (key, f"{label} {value} is not printed anywhere in the PDF; check it on the statement.")
-        for key, label, value in _not_in_text(fields, data["summary"] or {}, pages)
+        for key, label, value in _not_in_text(fields, _model_summary(data), pages)
     ]
     warnings += [message for _, message in unverified]
     warnings += [check.message for check in checks if check.failed]
@@ -187,6 +196,13 @@ def build_report(
         warnings=warnings,
         unverified=unverified,
     )
+
+
+def _model_summary(data: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Summary values the "not in the PDF" check should look at (the ones in use)."""
+    read = set(data.get("summary_from_text") or []) & set(_SUMMARY_AMOUNTS)
+    summary = data.get("summary") or {}
+    return {k: v for k, v in summary.items() if not read or k in read}
 
 
 _LABELS = {

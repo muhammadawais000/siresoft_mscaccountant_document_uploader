@@ -304,6 +304,23 @@ def test_cash_advance_counts_by_its_sign() -> None:
     assert sp.expected_debits({**advance, "fees": D("5.00"), "interest": D("1.00")}) == D("36.00")
 
 
+def test_payments_and_credits_is_never_topped_up() -> None:
+    """Seen: 7,296.26 (TOTAL CREDITS, given as payments and credits) + 613.03 = 7,909.29."""
+    summary = {"payments_and_credits": D("-7296.26"), "cash_advances": D("-613.03")}
+    assert sp.expected_credits(summary) == D("7296.26")
+    result = check("credits_ok", simple("-613.03", "-6683.23"), summary=summary)
+    assert result.ok is True
+
+
+def test_a_summed_expectation_says_what_it_adds() -> None:
+    summary = {"payments": D("-6683.23"), "cash_advances": D("-613.03")}
+    result = check("credits_ok", simple("-613.03", "-6683.23"), summary=summary)
+    assert result.ok is True
+    assert "Payments 6,683.23 + Cash advance 613.03 = 7,296.26" in result.message
+    off = check("credits_ok", simple("-6683.23"), summary=summary)
+    assert "statement shows" not in off.message
+
+
 def test_unprinted_totals_do_not_fail() -> None:
     for code in ("debits_ok", "credits_ok", "section_ok"):
         result = check(code, simple("10.00"))

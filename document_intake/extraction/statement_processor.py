@@ -604,28 +604,61 @@ def calculated_closing(previous: Decimal, totals: Totals) -> Decimal:
     return previous - totals.total_credits + totals.total_debits
 
 
-def expected_credits(summary: Mapping[str, Decimal | None]) -> Decimal | None:
-    """Printed payments and credits. A negative cash advance or adjustment is a credit
-    (BMO prints its cashback in the Cash Advance field)."""
-    base = summary.get("payments_and_credits")
-    if base is None:
-        base = summary.get("payments")
-    if base is None:
+Parts = list[tuple[str, Decimal]]
+
+
+def credit_parts(summary: Mapping[str, Decimal | None]) -> Parts | None:
+    """The printed numbers that make up the payments total, or None if none is printed.
+
+    "Payments and credits" is already the whole total and is never added to. Only a bare
+    "Payments" line is topped up with a negative cash advance or adjustment (BMO prints its
+    cashback in the Cash Advance field).
+    """
+    total = summary.get("payments_and_credits")
+    if total is not None:
+        return [("Payments and credits", abs(total))]
+    payments = summary.get("payments")
+    if payments is None:
         return None
-    extra = (summary.get("cash_advances"), summary.get("adjustments"))
-    return abs(base) + sum((-v for v in extra if v is not None and v < 0), ZERO)
+    parts = [("Payments", abs(payments))]
+    for key, label in (("cash_advances", "Cash advance"), ("adjustments", "Adjustments")):
+        value = summary.get(key)
+        if value is not None and value < 0:
+            parts.append((label, -value))
+    return parts
+
+
+def debit_parts(summary: Mapping[str, Decimal | None]) -> Parts | None:
+    """Printed purchases plus the charges that are printed on their own line."""
+    if (base := summary.get("purchases_and_other_charges")) is not None:
+        parts = [("Purchases and other charges", base)]
+    elif (base := summary.get("net_purchases")) is not None:
+        parts = [("Net purchases", base)]
+    else:
+        return None
+    for key, label in (
+        ("cash_advances", "Cash advance"),
+        ("interest", "Interest"),
+        ("fees", "Fees"),
+        ("other_charges", "Other charges"),
+        ("adjustments", "Adjustments"),
+    ):
+        value = summary.get(key)
+        if value is not None and value > 0:
+            parts.append((label, value))
+    return parts
+
+
+def _total(parts: Parts | None) -> Decimal | None:
+    return None if parts is None else sum((value for _, value in parts), ZERO)
+
+
+def expected_credits(summary: Mapping[str, Decimal | None]) -> Decimal | None:
+    return _total(credit_parts(summary))
 
 
 def expected_debits(summary: Mapping[str, Decimal | None]) -> Decimal | None:
-    """Printed purchases plus the charges that are printed on their own line."""
-    base = summary.get("purchases_and_other_charges")
-    if base is None:
-        base = summary.get("net_purchases")
-    if base is None:
-        return None
-    keys = ("cash_advances", "interest", "fees", "other_charges", "adjustments")
-    extra = (summary.get(key) for key in keys)
-    return base + sum((v for v in extra if v is not None and v > 0), ZERO)
+    return _total(debit_parts(summary))
 
 
 def _same(a: Decimal, b: Decimal) -> bool:
@@ -650,8 +683,8 @@ def run_checks(
     missing = [row.line_no for row in rows if row.amount is None]
     return [
         _closing_check(totals, previous, printed_closing, bool(missing)),
-        _total_check("debits_ok", "Purchases", totals.total_debits, expected_debits(summary)),
-        _total_check("credits_ok", "Payments", totals.total_credits, expected_credits(summary)),
+        _total_check("debits_ok", "Purchases", totals.total_debits, debit_parts(summary)),
+        _total_check("credits_ok", "Payments", totals.total_credits, credit_parts(summary)),
         _rows_check(len(rows), text_rows, missing),
         _section_check(rows, sections),
     ]
@@ -675,12 +708,19 @@ def _closing_check(
     )
 
 
-def _total_check(code: str, label: str, actual: Decimal, expected: Decimal | None) -> Check:
-    if expected is None:
+def _total_check(code: str, label: str, actual: Decimal, parts: Parts | None) -> Check:
+    expected = _total(parts)
+    if parts is None or expected is None:
         message = f"The statement prints no {label.lower()} total."
         return Check(code=code, label=f"{label} total", ok=None, message=message, actual=actual)
     ok = _same(actual, expected)
-    message = f"{label} add up to {_fmt(actual)}, statement shows {_fmt(expected)}" + (
+    # Say where the number comes from, so a sum is never mistaken for a printed figure.
+    if len(parts) == 1:
+        source = f"statement shows {_fmt(expected)}"
+    else:
+        joined = " + ".join(f"{name} {_fmt(value)}" for name, value in parts)
+        source = f"statement: {joined} = {_fmt(expected)}"
+    message = f"{label} add up to {_fmt(actual)}; {source}" + (
         "." if ok else f" (difference {_fmt(expected - actual)})."
     )
     return Check(
