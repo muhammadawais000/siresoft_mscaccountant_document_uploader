@@ -247,8 +247,11 @@ class PageProvider(ExtractionProvider):
 
     name = "fake"
 
-    def __init__(self, pages: dict[int, dict[str, Any]]) -> None:
+    def __init__(
+        self, pages: dict[int, dict[str, Any]], missed: dict[int, dict[str, Any]] | None = None
+    ) -> None:
         self.pages = pages
+        self.missed = missed or {}
         self.asked: list[int] = []
         self.requests: list[ModelRequest] = []
 
@@ -256,9 +259,14 @@ class PageProvider(ExtractionProvider):
         return "fake-vision" if vision else "fake-text"
 
     def complete_json(self, request: ModelRequest) -> ModelResponse:
+        self.requests.append(request)
+        missed = re.search(r"These lines are from page (\d+)\.", request.user)
+        if missed:
+            number = int(missed[1])
+            self.asked.append(-number)  # negative = the second request for missed rows
+            return ModelResponse(self.missed[number], "fake-text", 1)
         match = re.search(r"This is page (\d+) of", request.user)
         assert match
         number = int(match[1])
         self.asked.append(number)
-        self.requests.append(request)
         return ModelResponse(self.pages[number], "fake-text", 1)

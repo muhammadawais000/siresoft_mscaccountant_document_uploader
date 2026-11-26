@@ -18,6 +18,7 @@ from document_intake.tests.card_fixtures import (
     TD_TEXT,
     PageProvider,
     make_pdf,
+    page,
 )
 from document_intake.tests.conftest import make_image
 from document_intake.tests.factories import DocumentFactory
@@ -28,14 +29,14 @@ TEXT = {"bmo": BMO_TEXT, "td": TD_TEXT}
 PAGES = {"bmo": BMO_PAGES, "td": TD_PAGES}
 
 
-def extract(user, name, change=None):
+def extract(user, name, change=None, missed=None):
     pages = copy.deepcopy(PAGES[name])
     if change:
         change(pages)
     doc = DocumentFactory(
         uploaded_by=user, content=make_pdf(TEXT[name]), doc_type=DocType.CREDIT_CARD_STATEMENT
     )
-    provider = PageProvider(pages)
+    provider = PageProvider(pages, missed)
     run_extraction(doc.id, provider)
     doc.refresh_from_db()
     return doc, provider
@@ -116,7 +117,9 @@ def test_missing_row_is_found_and_blocks_approval(auth_client, user, staff_user)
     def drop_one(pages):
         pages[2]["transactions"].pop(4)
 
-    doc, _ = extract(user, "bmo", drop_one)
+    # The second request gets nothing back either.
+    doc, provider = extract(user, "bmo", drop_one, missed={2: page([])})
+    assert provider.asked == [1, 2, -2]
     data = api(auth_client, doc)
     assert data["status"] == "needs_review"
     assert data["checks"]["rows_ok"] is False
@@ -196,7 +199,7 @@ def test_review_page_hides_tax_and_shows_banner(staff_client, user) -> None:
     def drop_one(pages):
         pages[3]["transactions"].pop(0)
 
-    doc, _ = extract(user, "td", drop_one)
+    doc, _ = extract(user, "td", drop_one, missed={3: page([])})
     html = staff_client.get(
         reverse("document_intake:document-review", kwargs={"pk": doc.pk})
     ).content.decode()
@@ -269,3 +272,37 @@ def test_sign_comes_from_the_pdf_even_if_the_model_gets_it_wrong(
     assert (len(data["debits"]), len(data["credits"])) == (debits, credits)
     assert data["status"] == "ok", data["warnings"]
     assert any("sign" in w for w in data["warnings"])
+
+
+def test_last_row_under_a_new_card_is_asked_for_again(auth_client, user) -> None:
+    """Seen with qwen2.5:7b: page 2 ended at card 3664's totals and left out card 5124's row."""
+    touchbistro = copy.deepcopy(BMO_PAGES[2]["transactions"][-1])
+
+    def drop_last(pages):
+        pages[2]["transactions"].pop()
+
+    doc, provider = extract(user, "bmo", drop_last, missed={2: page([touchbistro])})
+    assert provider.asked == [1, 2, -2]
+    missed_request = provider.requests[-1].user
+    assert "12/28 12/29 SHOP 25 TORONTO ON" in missed_request
+    assert "SHOP 24" not in missed_request
+    data = api(auth_client, doc)
+    assert data["status"] == "ok", data["warnings"]
+    assert data["checks"]["section_ok"] is True
+    assert data["debits"][-1]["card_last4"] == "5124"
+    assert [x["line_no"] for x in data["lines"]] == list(range(1, 28))
+
+
+def test_balance_the_pdf_does_not_print_is_flagged(auth_client, user) -> None:
+    """Seen with qwen2.5:7b: New Account Balance read as 7,942.00."""
+
+    def misread(pages):
+        pages[1]["summary"]["new_balance"] = "$ 7,942.00"
+
+    doc, _ = extract(user, "bmo", misread)
+    data = api(auth_client, doc)
+    assert data["status"] == "needs_review"
+    assert data["checks"]["closing_ok"] is False
+    assert any("7,942.00 is not printed anywhere in the PDF" in w for w in data["warnings"])
+    issue = next(i for i in data["issues"] if i["rule_code"] == "card_value_not_in_text")
+    assert issue["field_key"] == "closing_balance"

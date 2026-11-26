@@ -36,6 +36,7 @@ class CardReport(BaseModel):
     balance: processor.Balance
     checks: list[processor.Check]
     warnings: list[str]
+    unverified: list[tuple[str, str]] = []
 
     @property
     def has_tax(self) -> bool:
@@ -43,7 +44,7 @@ class CardReport(BaseModel):
 
     def as_dict(self) -> dict[str, Any]:
         """JSON-ready. Amounts are decimal strings; credits are shown as positive."""
-        data = self.model_dump(mode="json")
+        data = self.model_dump(mode="json", exclude={"unverified"})
         details = data.pop("checks")
         for row, source in zip(data["credits"], self.credits, strict=True):
             row["amount"] = str(abs(source.amount)) if source.amount is not None else None
@@ -158,12 +159,19 @@ def build_report(
         f"Line {row.line_no} reads like a payment or refund, but the printed amount is a charge."
         for row in conflicts
     ]
+    unverified = [
+        (key, f"{label} {value} is not printed anywhere in the PDF; check it on the statement.")
+        for key, label, value in _not_in_text(fields, data["summary"] or {}, pages)
+    ]
+    warnings += [message for _, message in unverified]
     warnings += [check.message for check in checks if check.failed]
     closing = None
     if previous is not None and not unclassified:  # never a balance with amounts left out
         closing = processor.calculated_closing(previous, totals)
     return CardReport(
-        status="needs_review" if conflicts or any(c.failed for c in checks) else "ok",
+        status=(
+            "needs_review" if conflicts or unverified or any(c.failed for c in checks) else "ok"
+        ),
         debits=debits,
         credits=credits,
         unclassified=unclassified,
@@ -177,7 +185,53 @@ def build_report(
         ),
         checks=checks,
         warnings=warnings,
+        unverified=unverified,
     )
+
+
+_LABELS = {
+    "opening_balance": "Opening balance",
+    "closing_balance": "Closing balance",
+    "payments": "Printed payments",
+    "payments_and_credits": "Printed payments and credits",
+    "purchases_and_other_charges": "Printed purchases",
+    "net_purchases": "Printed net purchases",
+    "cash_advances": "Printed cash advance",
+    "interest": "Printed interest",
+    "fees": "Printed fees",
+    "adjustments": "Printed adjustments",
+    "other_charges": "Printed other charges",
+}
+
+
+def _not_in_text(
+    fields: Iterable[ExtractedField], summary: Mapping[str, Any], pages: list[str]
+) -> list[tuple[str, str, str]]:
+    """(field key, label, value) for amounts the model gave that the PDF does not print.
+
+    The header balances are read as they stand now, so a reviewer's correction clears it.
+    Scans have no text and are not checked here.
+    """
+    if not pages:
+        return []
+    printed = processor.printed_amounts(pages)
+    values: list[tuple[str, Any]] = [
+        (key, _header_amount(fields, key)) for key in ("opening_balance", "closing_balance")
+    ]
+    for key in _SUMMARY_AMOUNTS:
+        try:
+            values.append((key, parsing.parse_printed_amount(summary.get(key))))
+        except parsing.ParseError:
+            continue
+    return [
+        (
+            key if key in ("opening_balance", "closing_balance") else "",
+            _LABELS[key],
+            f"{value:,.2f}",
+        )
+        for key, value in values
+        if value is not None and value != 0 and abs(value) not in printed
+    ]
 
 
 def report_issues(report: CardReport, removed: Iterable[Mapping[str, Any]]) -> list[Issue]:
@@ -191,6 +245,10 @@ def report_issues(report: CardReport, removed: Iterable[Mapping[str, Any]]) -> l
             code = code.replace("_mismatch", "_unverified")
         severity = Sev.ERROR if check.ok is False else Sev.WARNING
         issues.append(Issue(code, severity, check.message, key))
+    issues += [
+        Issue("card_value_not_in_text", Sev.WARNING, message, key)
+        for key, message in report.unverified
+    ]
     issues += [
         Issue(
             "card_row_removed",

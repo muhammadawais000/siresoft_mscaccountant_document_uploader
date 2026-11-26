@@ -123,6 +123,7 @@ class TextRow:
     page: int
     line: str
     card_last4: str  # "" when no card header was printed above it
+    next_line: str = ""  # often the Trans ID and Auth # of this row
 
     @property
     def amounts(self) -> list[Decimal]:
@@ -188,7 +189,8 @@ def read_layout(pages: Sequence[str]) -> TextLayout:
     first: dict[int, str] = {}
     for number, page in enumerate(pages, 1):
         first[number] = card
-        for line in page.splitlines():
+        lines = page.splitlines()
+        for position, line in enumerate(lines):
             if header := _CARD_HEADER.match(line):
                 card, found = header[1], True
             elif footer := _CARD_FOOTER.match(line):
@@ -197,7 +199,8 @@ def read_layout(pages: Sequence[str]) -> TextLayout:
                     parse_printed_amount(footer[3]) or ZERO
                 )
             elif pattern is not None and pattern.match(line):
-                rows.append(TextRow(number, line, card))
+                following = lines[position + 1] if position + 1 < len(lines) else ""
+                rows.append(TextRow(number, line, card, following))
     return TextLayout(tuple(rows), footers, first, found)
 
 
@@ -289,7 +292,14 @@ def _find_text_row(
     """
     amount = _model_amount(item)
     if amount is None:
-        return None
+        # No amount to compare: tie it to its line by the dates, so that line is not asked for
+        # again. The amount itself is not filled in from the line; the row stays flagged.
+        same_dates = [
+            i
+            for i, row in enumerate(layout.rows)
+            if row.page == page and i not in used and row.starts_with_dates(item)
+        ]
+        return next(iter(same_dates), None)
     matches = [
         i
         for i, row in enumerate(layout.rows)
@@ -311,6 +321,8 @@ def _apply_text(
     row["not_in_text"] = has_rows and amount is not None and text_row is None
     if text_row is None or amount is None:
         return
+    if not any(abs(value) == abs(amount) for value in text_row.amounts):
+        return
     printed = next(value for value in text_row.amounts if abs(value) == abs(amount))
     row["text_amount"] = str(printed)
     row["sign_corrected"] = printed != amount
@@ -330,6 +342,11 @@ def _card_for(
             return candidate.card_last4
     cards = {candidate.card_last4 for candidate in on_page}
     return cards.pop() if len(cards) == 1 else last4(item.card_last4)
+
+
+def printed_amounts(pages: Sequence[str]) -> set[Decimal]:
+    """Every amount printed anywhere in the PDF text, without its sign."""
+    return {abs(value) for page in pages for value in TextRow(0, page, "").amounts}
 
 
 def merge_pages(answers: Sequence[tuple[int, PrintedPage]], pages: Sequence[str]) -> dict[str, Any]:
@@ -358,7 +375,9 @@ def merge_pages(answers: Sequence[tuple[int, PrintedPage]], pages: Sequence[str]
     transactions: list[dict[str, Any]] = []
     removed: list[dict[str, Any]] = []
     used: set[int] = set()
+    order: list[float] = []
     for page, answer in answers:
+        last = -1.0
         for item in answer.transactions:
             row = {**item.model_dump(), "page": page, "date_reference": reference}
             dated = bool(item.trans_date or item.posting_date)
@@ -370,9 +389,30 @@ def merge_pages(answers: Sequence[tuple[int, PrintedPage]], pages: Sequence[str]
             if index is not None:
                 used.add(index)
                 text_row = layout.rows[index]
+                last = float(index)
+            row["text_index"] = index
             _apply_text(row, item, text_row, bool(layout.rows))
             row["card_last4"] = _card_for(item, page, layout, text_row, summary["card_last4"] or "")
             transactions.append(row)
+            # Printed order. A row not found in the text stays right after the one before it.
+            order.append(float(index) if index is not None else last + 0.5)
+    transactions = [
+        row
+        for _, _, row in sorted(
+            zip(order, range(len(order)), transactions, strict=True),
+            key=lambda item: (item[2]["page"], item[0], item[1]),
+        )
+    ]
+    missed = [
+        {
+            "page": row.page,
+            "line": row.line,
+            "next_line": row.next_line,
+            "card_last4": row.card_last4,
+        }
+        for i, row in enumerate(layout.rows)
+        if i not in used
+    ]
 
     if layout.footers:
         sections = [
@@ -401,6 +441,8 @@ def merge_pages(answers: Sequence[tuple[int, PrintedPage]], pages: Sequence[str]
         "section_totals": sections,
         "transactions": transactions,
         "removed_rows": removed,
+        # Printed transaction lines that no answer matched (the model left them out).
+        "missed_lines": missed,
         # Recorded for diagnosis only; the row check counts the PDF text instead.
         "rows_detected_in_text": sum(a.rows_detected_in_text or 0 for _, a in answers),
         "rows_returned": sum(a.rows_returned or 0 for _, a in answers),

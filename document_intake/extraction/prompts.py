@@ -104,6 +104,17 @@ def card_system_prompt(default_currency: str) -> str:
     return CARD_SYSTEM_PROMPT.format(default_currency=default_currency)
 
 
+def missed_lines_prompt(task: str, number: int, lines: list[str]) -> str:
+    """A second, small request for printed rows the first answer left out."""
+    text = "\n".join(lines)
+    return (
+        f"{task}\n\nThese lines are from page {number}. They are transactions that were left out "
+        "of the first answer. Return each of them as a transaction, exactly as printed. A line "
+        "of numbers under a row is that row's Trans ID and Auth #, not a new row. Leave "
+        f"summary and section_totals empty.\n\nLines:\n<<<\n{text}\n>>>"
+    )
+
+
 def card_page_prompt(task: str, number: int, count: int, card_last4: str) -> str:
     """The task for one page, with the card whose section is still open from the page before."""
     text = f"{task}\n\nThis is page {number} of {count}."

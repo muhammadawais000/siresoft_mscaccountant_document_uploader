@@ -72,4 +72,25 @@ def extract_card_statement(
     for number, request in requests:
         answer, model = _ask(provider, request, number)
         answers.append((number, answer))
-    return processor.merge_pages(answers, pages), model
+    data = processor.merge_pages(answers, pages)
+
+    # Printed rows the model left out (for example the last row under a new card header):
+    # ask once more with only those lines. Anything still missing fails the row check.
+    by_page: dict[int, list[str]] = {}
+    for missed in data["missed_lines"]:
+        by_page.setdefault(missed["page"], []).extend(
+            line for line in (missed["line"], missed["next_line"]) if line
+        )
+    for number, lines in by_page.items():
+        user = prompts.missed_lines_prompt(task, number, lines)
+        answer, model = _ask(provider, ModelRequest(system, user, schema), number)
+        blank = processor.PrintedPage(
+            summary=processor.PrintedSummary(),
+            section_totals=[],
+            transactions=answer.transactions,
+        )
+        answers.append((number, blank))
+    if by_page:
+        logger.info("asked again for missed rows", extra={"pages": sorted(by_page)})
+        data = processor.merge_pages(answers, pages)
+    return data, model
