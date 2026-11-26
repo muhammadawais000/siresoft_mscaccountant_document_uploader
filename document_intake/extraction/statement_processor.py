@@ -483,12 +483,17 @@ def merge_pages(answers: Sequence[tuple[int, PrintedPage]], pages: Sequence[str]
             }
             for card, totals in layout.footers.items()
         ]
-    else:
+    elif not pages:
+        # A scan has no text to read the totals from; the model's copy is all there is.
         sections = [
             {**section.model_dump(), "card_last4": last4(section.card_last4)}
             for _, answer in answers
             for section in answer.section_totals
         ]
+    else:
+        # The PDF prints no totals per card (TD, CIBC). The model's are never used here:
+        # seen with qwen2.5:7b, it returned TD's rewards points (42,981) as a card total.
+        sections = []
     return {
         "institution_name": summary["institution"],
         "account_last4": summary["card_last4"],

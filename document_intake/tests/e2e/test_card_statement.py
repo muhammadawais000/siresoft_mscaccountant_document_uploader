@@ -275,7 +275,8 @@ def test_sign_comes_from_the_pdf_even_if_the_model_gets_it_wrong(
     data = api(auth_client, doc)
     assert (len(data["debits"]), len(data["credits"])) == (debits, credits)
     assert data["status"] == "ok", data["warnings"]
-    assert any("sign" in w for w in data["warnings"])
+    assert not any("sign" in w for w in data["warnings"])
+    assert any("sign printed in the PDF was used" in n for n in data["notes"])
 
 
 def test_last_row_under_a_new_card_is_asked_for_again(auth_client, user) -> None:
@@ -376,3 +377,19 @@ def test_model_summary_in_the_wrong_box_is_not_used(auth_client, user) -> None:
     assert data["status"] == "ok"
     detail = next(c for c in data["check_details"] if c["code"] == "credits_ok")
     assert "Payments 6,683.23 + Cash advance 613.03 = 7,296.26" in detail["message"]
+
+
+def test_card_totals_the_pdf_does_not_print_are_not_taken_from_the_model(auth_client, user) -> None:
+    """Seen with qwen2.5:7b on TD: section totals of 42,981.00 (rewards points), 2,000.00
+    and 17,719.00, though TD prints no totals per card."""
+
+    def invent(pages):
+        pages[1]["section_totals"] = [
+            {"card_last4": "8054", "total_credits": "$42,981.00", "total_debits": "$2,000.00"},
+            {"card_last4": "8054", "total_credits": None, "total_debits": "$17,719.00"},
+        ]
+
+    doc, _ = extract(user, "td", invent)
+    data = api(auth_client, doc)
+    assert data["status"] == "ok", data["warnings"]
+    assert data["checks"]["section_ok"] is None

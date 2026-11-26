@@ -36,6 +36,8 @@ class CardReport(BaseModel):
     balance: processor.Balance
     checks: list[processor.Check]
     warnings: list[str]
+    # Things done for the reviewer that need no action (not shown in the red banner).
+    notes: list[str] = []
     unverified: list[tuple[str, str]] = []
 
     @property
@@ -158,10 +160,11 @@ def build_report(
         for row in data.get("removed_rows") or []
     ]
     corrected = sum(1 for row in data.get("transactions") or [] if row.get("sign_corrected"))
+    notes: list[str] = []
     if corrected:
-        warnings.append(
+        notes.append(
             f"The model got the sign wrong on {corrected} row{'s' if corrected != 1 else ''}; "
-            "the sign printed in the PDF was used."
+            "the sign printed in the PDF was used. No action needed."
         )
     conflicts = [row for row in debits if row.amount and parsing.looks_like_credit(row.description)]
     warnings += [
@@ -194,6 +197,7 @@ def build_report(
         ),
         checks=checks,
         warnings=warnings,
+        notes=notes,
         unverified=unverified,
     )
 

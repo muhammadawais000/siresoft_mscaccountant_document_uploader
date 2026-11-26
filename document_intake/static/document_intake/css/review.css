@@ -233,6 +233,14 @@
 .checks__item--bad .checks__label,
 .checks__item--bad .checks__text { color: var(--c-err-ink); }
 .checks__item--na .checks__mark { color: var(--c-ink-faint); }
+.checks__note {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-4);
+  border-top: 1px solid var(--c-border);
+  color: var(--c-ink-muted);
+  font-size: var(--fs-sm);
+}
+
 .checks__why { margin: var(--sp-1) 0 0; padding-left: var(--sp-5); }
 
 @media (max-width: 600px) {
