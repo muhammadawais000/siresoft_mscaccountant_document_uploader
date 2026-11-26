@@ -169,3 +169,33 @@ def test_route_text_too_long() -> None:
 def test_route_unknown_type() -> None:
     with pytest.raises(ExtractionError):
         prepare_input(make_pdf(), "text/plain")
+
+
+def masked_scan_pdf() -> bytes:
+    """A scan with only a redaction layer as text, like the RBC sample."""
+    out = io.BytesIO()
+    pdf = canvas.Canvas(out, pagesize=letter)
+    for i in range(6):
+        pdf.drawString(72, 720 - 14 * i, "x" * 30)
+    pdf.drawInlineImage(Image.new("RGB", (200, 260), "white"), 72, 300)
+    pdf.showPage()
+    pdf.save()
+    return out.getvalue()
+
+
+def test_redaction_mask_is_not_a_text_layer() -> None:
+    result = sources.read_pdf_text(io.BytesIO(masked_scan_pdf()))
+    assert "xxxxxxxx" in result.text
+    assert not result.has_text_layer()
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("xxxxxxxxxxxx\nXXXX ****", 0),
+        ("4516 07** **** 6946", 10),
+        ("PAYMENT - THANK YOU -$4,000.00", 21),
+    ],
+)
+def test_readable_chars(text, expected) -> None:
+    assert sources.readable_chars(text) == expected

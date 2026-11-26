@@ -171,6 +171,11 @@ def build_report(
     ]
     corrected = sum(1 for row in data.get("transactions") or [] if row.get("sign_corrected"))
     notes: list[str] = []
+    if data.get("balances_rechecked"):
+        notes.append(
+            "The previous and new balance were read again and checked against the "
+            "transactions. No action needed."
+        )
     section = sum(1 for row in data.get("transactions") or [] if row.get("payment_section"))
     if section:
         notes.append(

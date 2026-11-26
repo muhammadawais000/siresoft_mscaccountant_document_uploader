@@ -84,9 +84,12 @@ class PrintedPage(_Printed):
 _PAGE_MARK = re.compile(r"^--- Page \d+ ---$", re.M)
 _MONTH = r"(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\.?"
 # Two dates at the start of a line. pdfplumber often drops the spaces ("OCT6 OCT7").
+# Some banks print a reference number first (Scotia: "001 Dec 14 Dec 15").
+_REF = r"(?:[A-Z0-9*#]{1,6}\s+)?"
 _ROW_PATTERNS = (
-    re.compile(r"^\d{2}/\d{2}\s+\d{2}/\d{2}\b", re.M),  # BMO: 12/03 12/04
-    re.compile(rf"^{_MONTH}\s?\d{{1,2}}\s*{_MONTH}\s?\d{{1,2}}\b", re.M | re.I),  # TD, CIBC
+    re.compile(rf"^{_REF}\d{{2}}/\d{{2}}\s+\d{{2}}/\d{{2}}\b", re.M),  # BMO: 12/03 12/04
+    # TD "OCT6 OCT7" (spaces dropped), CIBC "Jan 14 Jan 16", Scotia "001 Dec 14 Dec 15"
+    re.compile(rf"^{_REF}{_MONTH}\s?\d{{1,2}}\s*{_MONTH}\s?\d{{1,2}}\b", re.M | re.I),
 )
 # Looser: any line that starts with a date and holds an amount. Such a page is never skipped.
 _DATED_AMOUNT = re.compile(
@@ -100,7 +103,9 @@ _CARD_HEADER = re.compile(
     re.I,
 )
 _CARD_FOOTER = re.compile(
-    r"^TOTAL\s*(CREDITS|DEBITS)\s+[X*\d\-\s]*?(\d{4})\s+(\$?\s*-?\s*\$?[\d,]+\.\d{2})", re.I
+    r"^(?:SUB\s*-?\s*)?TOTAL\s*(CREDITS|DEBITS)\s*-?\s*[X*\d\-\s]*?(\d{4})\s+"
+    r"(\$?\s*-?\s*\$?[\d,]+\.\d{2}-?)",
+    re.I,
 )
 _SKIP_WORDS = re.compile(
     r"customer\s*service|telephone\s*inquir|lost/?stolen|payment\s*information|"
@@ -113,9 +118,12 @@ _SUMMARY_WORDS = re.compile(
 )
 
 
-# An amount with its own sign: "$ 14.98", "-$2,000.00", "$ -613.03", "-18.00", "12.00 CR".
+# An amount with its own sign: "$ 14.98", "-$2,000.00", "$ -613.03", "-18.00", "12.00 CR",
+# "500.00-" (Scotia), "+ $60.51".
 _AMOUNT_TOKEN = re.compile(
-    r"(?<![\d.,])-?\$?\s?-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}(?!\d)(?:\s?CR\b)?", re.I
+    r"(?<![\d.,])[-+]?\$?\s?-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}(?!\d|\s*%)"
+    r"(?:-(?!\d)|\s?CR\b)?",
+    re.I,
 )
 
 
@@ -143,7 +151,9 @@ class TextRow:
 
     def starts_with_dates(self, item: PrintedTransaction) -> bool:
         dates = re.sub(r"\s", "", f"{item.trans_date or ''}{item.posting_date or ''}").upper()
-        return bool(dates) and re.sub(r"\s", "", self.line).upper().startswith(dates)
+        line = re.sub(r"\s", "", self.line).upper()
+        unref = re.sub(r"\s", "", re.sub(rf"^{_REF}", "", self.line, flags=re.I)).upper()
+        return bool(dates) and (line.startswith(dates) or unref.startswith(dates))
 
 
 @dataclass(frozen=True)
@@ -225,6 +235,8 @@ def read_layout(pages: Sequence[str]) -> TextLayout:
 
 def needs_model(page: str, number: int) -> bool:
     """False for pages that clearly hold no transactions. Dated amounts always win."""
+    if number != 1 and not re.search(r"\d\.\d{2}(?!\d)", page):
+        return False  # no amount anywhere on the page (blank, ads, a page of terms)
     if number == 1 or _DATED_AMOUNT.search(page) or _SUMMARY_WORDS.search(page):
         return True
     if any(pattern.search(page) for pattern in _ROW_PATTERNS):
@@ -373,25 +385,49 @@ def _card_for(
 
 # ------------------------------------------------------- summary read from the PDF text
 
-_AMT = r"([-+]?\s?\$?\s?-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})(?!\d|\s*%)"
+_AMT_RE = re.compile(r"[-+]?\s?\$?\s?-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}(?!\d|\s*%)(?:-(?!\d))?")
 _SEP = r"\s*[:=]?\s*"
-# Label -> summary key. Spaces are optional because pdfplumber often drops them.
-_SUMMARY_LABELS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
-    (key, re.compile(f"(?:{pattern})" + _SEP + _AMT, re.I))
-    for key, pattern in (
-        ("previous_balance", r"previous\s*(?:statement\s*|account\s*)?balance"),
-        ("new_balance", r"(?<![a-z])(?:total\s*)?new\s*(?:account\s*)?balance|^total\s*balance"),
-        ("payments_and_credits", r"payments\s*(?:&|and)\s*credits|^total\s*credits"),
-        ("payments", r"(?<![a-z])payments(?!\s*(?:&|and))"),
-        ("purchases_and_other_charges", r"purchases\s*(?:&|and)\s*other\s*charges"),
-        ("net_purchases", r"net\s*purchases|(?<![a-z&])purchases(?!\s*(?:&|and))"),
-        ("cash_advances", r"cash\s*advances?"),
-        ("interest", r"(?<![a-z])interest(?!\s*rate)"),
-        ("fees", r"(?<![a-z])fees"),
-        ("adjustments", r"(?<![a-z&])adjustments"),
-        ("other_charges", r"(?<![a-z&])other\s*charges"),
-    )
-)
+# Text that may stand between a label and its amount ("Previous balance, Dec 14/24 $4,411.32",
+# "New Balance‡ = $4,455.10", "Purchases/charges + $1,983.27").
+_GAP = 25
+
+
+def _phrase(text: str) -> str:
+    """A label phrase from the settings as a pattern: spaces optional (pdfplumber drops them),
+    "&" also matches "and" and "/"."""
+    words = [r"(?:&|and|/)" if word == "&" else re.escape(word) for word in text.split()]
+    return r"(?<![a-z])" + r"\s*".join(words) + r"(?![a-z])"
+
+
+def _label_patterns() -> list[tuple[str, re.Pattern[str]]]:
+    from document_intake.conf import intake_settings
+
+    labels: dict[str, list[str]] = intake_settings.CARD_SUMMARY_LABELS
+    pairs = [(key, phrase) for key, phrases in labels.items() for phrase in phrases]
+    pairs.sort(key=lambda pair: -len(pair[1]))  # longest first wins an overlap
+    return [(key, re.compile(_phrase(phrase), re.I)) for key, phrase in pairs]
+
+
+def _summary_on_line(
+    line: str, patterns: list[tuple[str, re.Pattern[str]]]
+) -> list[tuple[str, str]]:
+    """(key, amount) pairs on one line. Overlapping labels: the longest one counts
+    ("Purchases & Other Charges" is not also "other charges")."""
+    spans: list[tuple[int, int, str]] = []
+    for key, pattern in patterns:
+        for match in pattern.finditer(line):
+            if not any(match.start() < end and start < match.end() for start, end, _ in spans):
+                spans.append((match.start(), match.end(), key))
+    spans.sort()
+    found = []
+    for i, (_, end, key) in enumerate(spans):
+        limit = spans[i + 1][0] if i + 1 < len(spans) else len(line)
+        amount = _AMT_RE.search(line, end, min(limit, end + _GAP + 20))
+        if amount and amount.start() - end <= _GAP:
+            found.append((key, amount.group().replace(" ", "")))
+    return found
+
+
 _DATE_TEXT = r"(\d{1,2}/\d{1,2}/\d{4}|[A-Za-z]{3,9}\.?\s?\d{1,2},?\s?\d{4})"
 _FORMAT = r"\s*(?:\((?:MM/DD/YYYY|DD/MM/YYYY)\))?"
 _DATE_LABELS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -402,17 +438,26 @@ _PERIOD = re.compile(_DATE_TEXT + r"\s*(?:to|-)\s*" + _DATE_TEXT, re.I)
 
 
 def read_summary(pages: Sequence[str]) -> dict[str, str]:
-    """Summary values printed next to their label (first page that has them).
+    """Summary values printed next to their label (the first time each label appears).
 
     These come from the PDF text, so they win over the model's copy. A label that is not
-    found leaves the model's value in place.
+    found leaves the model's value in place. Transaction lines are skipped. The label
+    phrases are a setting (``CARD_SUMMARY_LABELS``), so a new bank's wording is a line in
+    the settings, not code.
     """
+    patterns = _label_patterns()
+    rows = _row_pattern(pages)
     found: dict[str, str] = {}
     for page in pages:
         for line in page.splitlines():
-            for key, pattern in _SUMMARY_LABELS:
-                if key not in found and (match := pattern.search(line)):
-                    found[key] = match[1].replace(" ", "")
+            if _CARD_FOOTER.match(line):
+                continue  # one card's totals, not the statement's
+            if rows is not None and rows.match(line):
+                # A transaction line; a side box can be printed after its amount (TD).
+                own = _AMT_RE.search(line)
+                line = line[own.end() :] if own else ""
+            for key, value in _summary_on_line(line, patterns):
+                found.setdefault(key, value)
             for key, pattern in _DATE_LABELS:
                 if key not in found and (match := pattern.search(line)):
                     found[key] = match[1]
@@ -461,6 +506,9 @@ def merge_pages(answers: Sequence[tuple[int, PrintedPage]], pages: Sequence[str]
     # Rows with an amount are matched to the printed lines first. A row without an amount
     # then only gets a line nobody else took: seen with qwen2.5:7b on CIBC, an empty copy of
     # the payment took the payment's line and pushed the real payment out.
+    # No card headers but a single card's totals (Scotia): every row is that card.
+    only = next(iter(layout.footers)) if len(layout.footers) == 1 else ""
+    default_card = (only if not layout.has_sections else "") or summary["card_last4"] or ""
     entries = [
         (page, seq, item)
         for page, answer in answers
@@ -485,7 +533,7 @@ def merge_pages(answers: Sequence[tuple[int, PrintedPage]], pages: Sequence[str]
             text_row = layout.rows[index]
         row["text_index"] = index
         _apply_text(row, item, text_row, bool(layout.rows))
-        row["card_last4"] = _card_for(item, page, layout, text_row, summary["card_last4"] or "")
+        row["card_last4"] = _card_for(item, page, layout, text_row, default_card)
         transactions.append(row)
         # Printed order; a row not found in the text stays right after the one before it.
         earlier = [v for (p, q), v in placed.items() if p == page and q < seq]
@@ -647,6 +695,18 @@ def calculated_closing(previous: Decimal, totals: Totals) -> Decimal:
 
 
 Parts = list[tuple[str, Decimal]]
+
+
+def choose_balances(
+    previous: Sequence[Decimal], new: Sequence[Decimal], credits: Decimal, debits: Decimal
+) -> tuple[Decimal, Decimal] | None:
+    """The first (previous, new) pair, in the order given, that the transactions explain:
+    previous - credits + debits = new. Only read values are tried; nothing is made up."""
+    for before in previous:
+        for after in new:
+            if _same(before - credits + debits, after):
+                return before, after
+    return None
 
 
 def credit_parts(summary: Mapping[str, Decimal | None]) -> Parts | None:

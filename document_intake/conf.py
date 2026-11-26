@@ -52,6 +52,42 @@ DEFAULTS: dict[str, Any] = {
     # A PDF page counts as having a usable text layer above this many characters.
     "MIN_TEXT_CHARS_PER_PAGE": 40,
     "DEFAULT_CURRENCY": "CAD",
+    # Credit card statement summary: label phrases per value, read from the PDF text. Add a
+    # bank's own wording here. Spaces are optional and "&" also matches "and" and "/".
+    "CARD_SUMMARY_LABELS": {
+        "previous_balance": [
+            "previous statement balance",
+            "previous account balance",
+            "previous balance",
+            "balance from last statement",
+            "last statement balance",
+        ],
+        "new_balance": [
+            "total new balance",
+            "new account balance",
+            "new balance",
+            "account balance",
+            "total balance",
+        ],
+        "payments_and_credits": [
+            "payments & other credits",
+            "payments & credits",
+            "total credits",
+        ],
+        "payments": ["payments"],
+        "purchases_and_other_charges": [
+            "purchases & other charges",
+            "purchases & charges",
+            "purchases & debits",
+            "total charges",
+        ],
+        "net_purchases": ["net purchases", "purchases"],
+        "cash_advances": ["cash advances", "cash advance"],
+        "interest": ["interest"],
+        "fees": ["fees"],
+        "adjustments": ["adjustments"],
+        "other_charges": ["other charges"],
+    },
     # Validation
     "AMOUNT_TOLERANCE": "0.01",
     "EXPECTED_TAX_RATE": "0.13",  # Ontario HST, warning only

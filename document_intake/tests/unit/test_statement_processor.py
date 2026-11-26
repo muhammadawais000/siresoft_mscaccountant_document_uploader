@@ -59,6 +59,11 @@ def test_printed_amounts(text, expected) -> None:
     assert parse_printed_amount(text) == D(expected)
 
 
+@pytest.mark.parametrize(("text", "expected"), [("+$60.51", "60.51"), ("$2,000.00-", "-2000.00")])
+def test_plus_and_trailing_minus(text, expected) -> None:
+    assert parse_printed_amount(text) == D(expected)
+
+
 @pytest.mark.parametrize("text", ["-$2,000.00 CashAdvances $0.00", "-5.00 CR", 613.03, "abc"])
 def test_unclear_amounts_are_refused(text) -> None:
     with pytest.raises(ParseError):
@@ -131,6 +136,55 @@ def test_printed_text_wins_over_the_models_number() -> None:
 )
 def test_non_transactions(text, dated, expected) -> None:
     assert sp.is_non_transaction(text, dated=dated) is expected
+
+
+def test_reference_number_before_the_dates() -> None:
+    lines = "001 Dec 14 Dec 15 SHOP 79.10\n014 Jan 3 Jan 3 PAYMENT FROM - *****00*2214 500.00-"
+    layout = sp.read_layout([lines])
+    assert sp.count_rows([lines]) == 2
+    assert layout.rows[1].amounts == [D("-500.00")]
+
+
+def test_sub_total_footer() -> None:
+    text = (
+        "SUB-TOTAL CREDITS-4538 XXXX XXXX 4016 $2,000.00-\n"
+        "SUB-TOTAL DEBITS-4538 XXXX XXXX 4016 $2,043.78"
+    )
+    assert sp.read_layout([text]).footers == {
+        "4016": {"credits": D("2000.00"), "debits": D("2043.78")}
+    }
+
+
+@pytest.mark.parametrize(
+    ("line", "key", "expected"),
+    [
+        ("Previous balance,Dec 14/24 $4,411.32", "previous_balance", "$4,411.32"),
+        ("New Balance\u2021 = $4,455.10", "new_balance", "$4,455.10"),
+        ("Interest + $60.51", "interest", "+$60.51"),
+        ("Purchases/charges + $1,983.27", "purchases_and_other_charges", "+$1,983.27"),
+        ("Cash Back Summary Payments/credits - $2,000.00", "payments_and_credits", "-$2,000.00"),
+        ("Purchases & Other Charges $21,489.43", "other_charges", None),  # inside a longer label
+        ("TOTAL CREDITS xxxx-xxxx-xxxx-6915 $ -7,296.26", "payments_and_credits", None),
+    ],
+)
+def test_labels_with_text_before_the_amount(line, key, expected) -> None:
+    assert sp.read_summary([line]).get(key) == expected
+
+
+def test_label_wording_is_a_setting(settings) -> None:
+    settings.DOCUMENT_INTAKE = {
+        **settings.DOCUMENT_INTAKE,
+        "CARD_SUMMARY_LABELS": {"previous_balance": ["balance brought forward"]},
+    }
+    assert sp.read_summary(["Balance brought forward $10.00"]) == {"previous_balance": "$10.00"}
+
+
+def test_choose_balances_uses_only_read_values() -> None:
+    assert sp.choose_balances([D("-200"), D("200")], [D("-145"), D("145")], D("100"), D("45")) == (
+        D("200"),
+        D("145"),
+    )
+    assert sp.choose_balances([D("200")], [D("999")], D("100"), D("45")) is None
 
 
 def test_row_count_reads_the_pdf_text() -> None:

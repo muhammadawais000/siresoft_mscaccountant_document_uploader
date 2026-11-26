@@ -277,6 +277,49 @@ CIBC_PAGES = {
 }
 
 
+# -------------------------------------------------------------------------- Scotia
+# A reference number before the dates, payments as "100.00-", "+ $5.00" in the summary,
+# labels with text between them and the amount, and SUB-TOTAL lines per card.
+
+SCOTIA_TEXT = [
+    [
+        "Statement Period Dec 15, 2024 - Jan 14, 2025",
+        "Statement Date Jan 14, 2025",
+        "Payment Due Date Feb 10, 2025",
+        "New Balance\u2021 = $145.00",
+        "Previous balance,Dec 14/24 $200.00",
+        "Interest + $5.00",
+        "Cash Back Summary Payments/credits - $100.00",
+        "Purchases/charges + $40.00",
+        "Account Balance = $145.00",
+        "Purchases 19.99%",
+        "EXAMPLE HOLDER - 4538 XXXX XXXX 4016",
+        "001 Dec 14 Dec 15 SHOP ONE OTTAWA ON 25.00",
+        "002 Dec 15 Dec 16 PAYMENT FROM - *****00*2214 100.00-",
+        "003 Jan 2 Jan 3 SHOP TWO 866-237-8289 ON 15.00",
+        "004 Jan 14 Jan 14 INTEREST CHARGES-PURCHASE 5.00",
+        "SUB-TOTAL CREDITS-4538 XXXX XXXX 4016 $100.00-",
+        "SUB-TOTAL DEBITS-4538 XXXX XXXX 4016 $45.00",
+        "Interest charges posted on statement date",
+        "Purchases $5.00",
+    ],
+]
+SCOTIA_PAGES = {
+    1: page(
+        [
+            row("Dec 14", "Dec 15", "SHOP ONE OTTAWA ON", "25.00"),
+            row("Dec 15", "Dec 16", "PAYMENT FROM - *****00*2214", "100.00-"),
+            row("Jan 2", "Jan 3", "SHOP TWO 866-237-8289 ON", "15.00"),
+            row("Jan 14", "Jan 14", "INTEREST CHARGES-PURCHASE", "5.00"),
+        ],
+        institution="Scotiabank",
+        # Seen with qwen2.5:7b: both balances came back with a minus.
+        previous_balance="-$200.00",
+        new_balance="-$145.00",
+    ),
+}
+
+
 def make_pdf(pages: list[list[str]]) -> bytes:
     out = io.BytesIO()
     pdf = canvas.Canvas(out, pagesize=letter)
@@ -295,10 +338,14 @@ class PageProvider(ExtractionProvider):
     name = "fake"
 
     def __init__(
-        self, pages: dict[int, dict[str, Any]], missed: dict[int, dict[str, Any]] | None = None
+        self,
+        pages: dict[int, dict[str, Any]],
+        missed: dict[int, dict[str, Any]] | None = None,
+        summary: dict[str, Any] | None = None,
     ) -> None:
         self.pages = pages
         self.missed = missed or {}
+        self.summary = summary
         self.asked: list[int] = []
         self.requests: list[ModelRequest] = []
 
@@ -307,6 +354,9 @@ class PageProvider(ExtractionProvider):
 
     def complete_json(self, request: ModelRequest) -> ModelResponse:
         self.requests.append(request)
+        if "Read only the statement's account summary" in request.user:
+            self.asked.append(0)  # 0 = the summary asked for again
+            return ModelResponse(self.summary or page([]), "fake-text", 1)
         missed = re.search(r"These lines are from page (\d+)\.", request.user)
         if missed:
             number = int(missed[1])

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import re
 from dataclasses import dataclass
 
 import pdfplumber
@@ -11,6 +12,15 @@ from PIL import Image, ImageOps
 
 from document_intake.conf import intake_settings
 from document_intake.exceptions import DocumentTooLarge, ExtractionError
+
+# Redaction masks ("xxxxxxxx", "*****") are text, but they say nothing about the document.
+_MASK = re.compile(r"[xX*#]{3,}")
+_WORD_CHAR = re.compile(r"[A-Za-z0-9]")
+
+
+def readable_chars(text: str) -> int:
+    """Letters and digits that carry content, without redaction masks."""
+    return len(_WORD_CHAR.findall(_MASK.sub("", text)))
 
 
 @dataclass(frozen=True)
@@ -23,10 +33,14 @@ class PdfText:
         return "\n\n".join(f"--- Page {i} ---\n{page}" for i, page in enumerate(self.pages, 1))
 
     def has_text_layer(self) -> bool:
-        """True when the average page carries enough characters to be a digital PDF."""
+        """True when the average page carries enough real characters to be a digital PDF.
+
+        A scan with a redaction layer on top (seen: an RBC statement whose only text was
+        lines of "xxxxxxxx") has no usable text and goes to the vision model instead.
+        """
         if not self.page_count:
             return False
-        chars = sum(len(page.strip()) for page in self.pages)
+        chars = sum(readable_chars(page) for page in self.pages)
         return bool(chars / self.page_count >= intake_settings.MIN_TEXT_CHARS_PER_PAGE)
 
 

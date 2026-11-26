@@ -98,6 +98,8 @@ def parse_printed_amount(value: Any) -> Decimal | None:
     if not isinstance(value, str):
         return parse_money(value)
     text = _TAX_NOTE.sub("", value.strip().replace("\u2212", "-").replace("\u2013", "-"))
+    # A leading plus only says "added" (Scotia: "Interest + $60.51").
+    text = re.sub(r"^\+\s*", "", text)
     if _CR_SUFFIX.search(text):
         amount = parse_money(_CR_SUFFIX.sub("", text))
         if amount is not None and amount < 0:

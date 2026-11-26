@@ -115,6 +115,17 @@ def missed_lines_prompt(task: str, number: int, lines: list[str]) -> str:
     )
 
 
+def summary_prompt(task_text: str) -> str:
+    """A second, small request when the balances do not add up."""
+    return (
+        "Read only the statement's account summary: previous balance, payments and credits, "
+        "purchases and charges, cash advances, interest, fees and new balance. Copy each "
+        "amount exactly as printed, with any minus, plus or CR; null if it is not printed. "
+        "Return them in summary; leave transactions and section_totals empty."
+        f"\n\nStatement text:\n<<<\n{task_text}\n>>>"
+    )
+
+
 def card_page_prompt(task: str, number: int, count: int, card_last4: str) -> str:
     """The task for one page, with the card whose section is still open from the page before."""
     text = f"{task}\n\nThis is page {number} of {count}."

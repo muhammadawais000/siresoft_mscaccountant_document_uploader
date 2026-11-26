@@ -18,6 +18,8 @@ from document_intake.tests.card_fixtures import (
     BMO_TEXT,
     CIBC_PAGES,
     CIBC_TEXT,
+    SCOTIA_PAGES,
+    SCOTIA_TEXT,
     TD_PAGES,
     TD_TEXT,
     PageProvider,
@@ -29,11 +31,11 @@ from document_intake.tests.factories import DocumentFactory
 
 pytestmark = pytest.mark.django_db
 HTMX = {"HTTP_HX_REQUEST": "true"}
-TEXT = {"bmo": BMO_TEXT, "td": TD_TEXT, "cibc": CIBC_TEXT}
-PAGES = {"bmo": BMO_PAGES, "td": TD_PAGES, "cibc": CIBC_PAGES}
+TEXT = {"bmo": BMO_TEXT, "td": TD_TEXT, "cibc": CIBC_TEXT, "scotia": SCOTIA_TEXT}
+PAGES = {"bmo": BMO_PAGES, "td": TD_PAGES, "cibc": CIBC_PAGES, "scotia": SCOTIA_PAGES}
 
 
-def extract(user, name, change=None, missed=None, text=None):
+def extract(user, name, change=None, missed=None, text=None, summary=None):
     pages = copy.deepcopy(PAGES[name])
     if change:
         change(pages)
@@ -42,7 +44,7 @@ def extract(user, name, change=None, missed=None, text=None):
         content=make_pdf(text or TEXT[name]),
         doc_type=DocType.CREDIT_CARD_STATEMENT,
     )
-    provider = PageProvider(pages, missed)
+    provider = PageProvider(pages, missed, summary)
     run_extraction(doc.id, provider)
     doc.refresh_from_db()
     return doc, provider
@@ -416,3 +418,68 @@ def test_cibc_payment_printed_without_minus_is_a_credit(auth_client, user) -> No
     }
     assert any("payments heading; taken as credit" in note for note in data["notes"])
     assert not any("reads like a payment" in w for w in data["warnings"])
+
+
+def test_scotia_layout(auth_client, user) -> None:
+    """Seen on Scotia: no rows counted (a reference number comes first), "+ $60.51" not read,
+    the interest-on-purchases line taken as the purchases total, balances with a minus."""
+    doc, _ = extract(user, "scotia")
+    data = api(auth_client, doc)
+    assert data["status"] == "ok", data["warnings"]
+    assert data["checks"] == {
+        "closing_ok": True,
+        "debits_ok": True,
+        "credits_ok": True,
+        "rows_ok": True,
+        "section_ok": True,
+    }
+    assert data["balance"]["previous"] == "200.00"
+    assert data["balance"]["printed_closing"] == "145.00"
+    assert [r["amount"] for r in data["credits"]] == ["100.00"]
+    assert data["totals"]["total_debits"] == "45.00"  # the interest row is a debit
+    assert {r["card_last4"] for r in data["debits"] + data["credits"]} == {"4016"}
+    detail = next(c for c in data["check_details"] if c["code"] == "debits_ok")
+    assert "Purchases and other charges 40.00 + Interest 5.00 = 45.00" in detail["message"]
+
+
+def _unlabelled_td():
+    side = re.compile(r" (?:PreviousBalance|CashAdvances) \$[\d,.]+$")
+    labels = ("PREVIOUSSTATEMENTBALANCE", "Payments&", "Purchases&", "NEWBALANCE", "TOTALNEW")
+    return [
+        [side.sub("", line) for line in lines if not line.startswith(labels)] for lines in TD_TEXT
+    ]
+
+
+def test_balances_without_their_minus_when_that_adds_up(auth_client, user) -> None:
+    def minus(pages):
+        pages[1]["summary"].update(previous_balance="-$20,730.89", new_balance="-$19,717.42")
+
+    doc, provider = extract(user, "td", minus, text=_unlabelled_td())
+    data = api(auth_client, doc)
+    assert 0 not in provider.asked  # no second request needed
+    assert data["checks"]["closing_ok"] is True
+    assert data["balance"]["previous"] == "20730.89"
+    assert any("read again and checked" in note for note in data["notes"])
+
+
+def test_summary_is_asked_again_when_the_balances_do_not_add_up(auth_client, user) -> None:
+    def misread(pages):
+        pages[1]["summary"].update(previous_balance="$20,730.89", new_balance="$7,942.00")
+
+    again = page([], previous_balance="$20,730.89", new_balance="$19,717.42")
+    doc, provider = extract(user, "td", misread, text=_unlabelled_td(), summary=again)
+    assert provider.asked[-1] == 0
+    data = api(auth_client, doc)
+    assert data["checks"]["closing_ok"] is True
+    assert data["balance"]["printed_closing"] == "19717.42"
+
+
+def test_a_wrong_second_answer_changes_nothing(auth_client, user) -> None:
+    def misread(pages):
+        pages[1]["summary"].update(previous_balance="$20,730.89", new_balance="$7,942.00")
+
+    wrong = page([], previous_balance="$1.00", new_balance="$2.00")
+    doc, _ = extract(user, "td", misread, text=_unlabelled_td(), summary=wrong)
+    data = api(auth_client, doc)
+    assert data["checks"]["closing_ok"] is False
+    assert data["balance"]["printed_closing"] == "7942.00"

@@ -287,3 +287,12 @@ def test_document_deleted_during_extraction_is_discarded(user) -> None:
     assert doc.results.count() == 0
     mark_failed(doc.id, "late failure")  # a later failure report is ignored, no crash
     assert not AuditLog.objects.filter(document=doc, action=AuditAction.EXTRACT).exists()
+
+
+def test_masked_scan_goes_to_the_vision_model() -> None:
+    from document_intake.services.extraction import prepare_input
+    from document_intake.tests.unit.test_sources import masked_scan_pdf
+
+    prepared = prepare_input(masked_scan_pdf(), "application/pdf")
+    assert prepared.method == ExtractionMethod.VISION
+    assert len(prepared.images) == 1

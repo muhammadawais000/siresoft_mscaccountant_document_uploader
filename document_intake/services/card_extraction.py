@@ -7,13 +7,14 @@ merged by code (``extraction.statement_processor``).
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
 from document_intake.conf import intake_settings
 from document_intake.exceptions import MalformedModelOutput
-from document_intake.extraction import prompts, schemas
+from document_intake.extraction import parsing, prompts, schemas
 from document_intake.extraction import statement_processor as processor
 from document_intake.models import DocType
 from document_intake.providers.base import ExtractionProvider, ModelRequest
@@ -93,4 +94,85 @@ def extract_card_statement(
     if by_page:
         logger.info("asked again for missed rows", extra={"pages": sorted(by_page)})
         data = processor.merge_pages(answers, pages)
+    _settle_balances(provider, prepared, data, pages, system, schema)
     return data, model
+
+
+def _amount(value: Any) -> Decimal | None:
+    try:
+        return parsing.parse_printed_amount(value)
+    except parsing.ParseError:
+        return None
+
+
+def _options(*values: Any) -> list[Decimal]:
+    """Each read value, then the same without its sign, without repeats."""
+    found: list[Decimal] = []
+    for value in values:
+        amount = _amount(value)
+        if amount is None:
+            continue
+        for option in (amount, abs(amount)):
+            if option not in found:
+                found.append(option)
+    return found
+
+
+def _settle_balances(
+    provider: ExtractionProvider,
+    prepared: PreparedInput,
+    data: dict[str, Any],
+    pages: list[str],
+    system: str,
+    schema: dict[str, Any],
+) -> None:
+    """When previous - credits + debits is not the new balance, look again.
+
+    Seen with qwen2.5:7b on Scotia: both balances came back with a minus. First the read
+    values are tried without their sign; then the model is asked for the summary alone.
+    A pair is taken only if the transactions explain it. Otherwise nothing changes and the
+    closing check fails as before.
+    """
+    lines = parsing.build_lines(DocType.CREDIT_CARD_STATEMENT, data)
+    if not lines or any(line.debit is None and line.credit is None for line in lines):
+        return  # missing amounts: the row check reports that, balances cannot be judged
+    printed_rows = processor.count_rows(pages)
+    if printed_rows is not None and printed_rows != len(lines):
+        return  # rows are missing or extra: that explains the gap, the row check reports it
+    debits = sum((line.debit or Decimal("0") for line in lines), Decimal("0"))
+    credits = sum((line.credit or Decimal("0") for line in lines), Decimal("0"))
+    before, after = _amount(data["opening_balance"]), _amount(data["closing_balance"])
+    if before is not None and after is not None and before - credits + debits == after:
+        return
+    previous = _options(data["opening_balance"])
+    new = _options(data["closing_balance"])
+    pair = processor.choose_balances(previous, new, credits, debits)
+    if pair is None:
+        if prepared.vision:
+            request = ModelRequest(
+                system,
+                prompts.summary_prompt("(see the attached page image)"),
+                schema,
+                images=prepared.images[:1],
+                vision=True,
+            )
+        elif pages:
+            summary_page = next(
+                (page for page in pages if processor.needs_model(page, 1)), pages[0]
+            )
+            request = ModelRequest(system, prompts.summary_prompt(summary_page), schema)
+        else:
+            return
+        answer, _ = _ask(provider, request, 1)
+        pair = processor.choose_balances(
+            [*previous, *_options(answer.summary.previous_balance)],
+            [*new, *_options(answer.summary.new_balance)],
+            credits,
+            debits,
+        )
+    if pair is None:
+        return
+    data["opening_balance"], data["closing_balance"] = str(pair[0]), str(pair[1])
+    data["summary"]["previous_balance"], data["summary"]["new_balance"] = map(str, pair)
+    data["balances_rechecked"] = True
+    logger.info("balances re-read")
