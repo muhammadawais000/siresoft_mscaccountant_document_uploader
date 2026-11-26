@@ -171,6 +171,12 @@ def build_report(
     ]
     corrected = sum(1 for row in data.get("transactions") or [] if row.get("sign_corrected"))
     notes: list[str] = []
+    section = sum(1 for row in data.get("transactions") or [] if row.get("payment_section"))
+    if section:
+        notes.append(
+            f"{section} payment{'s' if section != 1 else ''} printed without a minus under the "
+            "statement's payments heading; taken as credit. No action needed."
+        )
     if corrected:
         notes.append(
             f"The model got the sign wrong on {corrected} row{'s' if corrected != 1 else ''}; "

@@ -231,6 +231,52 @@ TD_PAGES = {
 }
 
 
+# --------------------------------------------------------------------------- CIBC
+# Payments sit under their own heading and are printed WITHOUT a minus.
+
+CIBC_TEXT = [
+    [
+        "Your account at a glance",
+        "Previous balance $200.00",
+        "Payments $100.00",
+        "Other credits 5.00",
+        "Total credits - $105.00",
+        "Purchases 50.00",
+        "Total balance = $145.00",
+        "Statement Date",
+        "January 27, 2025",
+        "December 28, 2024 to January 27, 2025",
+    ],
+    [
+        "Your payments",
+        "Jan 14 Jan 16 PAYMENT THANK YOU/PAIEMENT MERCI 100.00",
+        "Total payments $100.00",
+        "Your new charges and credits",
+        "Card number 4500 XXXX XXXX 7104",
+        "Dec 27 Dec 30 PARKING TORONTO ON Transportation 30.00",
+        "Dec 30 Jan 07 TRAVEL CREDIT / CREDIT VOYAGE Professional Services -5.00",
+        "Jan 06 Jan 07 SHOP MISSISSAUGA ON Retail and Grocery 20.00",
+    ],
+]
+CIBC_PAGES = {
+    1: page([], institution="CIBC", card_last4="7104", currency="CAD"),
+    2: page(
+        [
+            # Seen with qwen2.5:7b: an empty copy of the payment, before the real one.
+            {
+                **row("Jan 14", "Jan 16", "PAYMENT THANK YOU", "0"),
+                "amount": None,
+                "amount_raw": None,
+            },
+            row("Jan 14", "Jan 16", "PAYMENT THANK YOU/PAIEMENT MERCI", "100.00"),
+            row("Dec 27", "Dec 30", "PARKING TORONTO ON", "30.00"),
+            row("Dec 30", "Jan 07", "TRAVEL CREDIT / CREDIT VOYAGE", "-5.00"),
+            row("Jan 06", "Jan 07", "SHOP MISSISSAUGA ON", "20.00"),
+        ]
+    ),
+}
+
+
 def make_pdf(pages: list[list[str]]) -> bytes:
     out = io.BytesIO()
     pdf = canvas.Canvas(out, pagesize=letter)

@@ -125,6 +125,8 @@ class TextRow:
     line: str
     card_last4: str  # "" when no card header was printed above it
     next_line: str = ""  # often the Trans ID and Auth # of this row
+    # Printed under a payments heading (CIBC: "Your payments"), where payments carry no minus.
+    payment_section: bool = False
 
     @property
     def amounts(self) -> list[Decimal]:
@@ -177,6 +179,17 @@ def count_rows(pages: Sequence[str]) -> int | None:
     return None if pattern is None else sum(len(pattern.findall(page)) for page in pages)
 
 
+# A heading line (no amount on it) that opens or closes a payments section.
+_PAYMENTS_HEADING = re.compile(
+    r"^(?:your\s*)?payments(?:\s*(?:and|&)\s*(?:other\s*)?credits)?(?:\s*received)?\s*$", re.I
+)
+_OTHER_HEADING = re.compile(
+    r"^(?:total\s*payments|your\s*new\s*charges|new\s*charges|purchases|"
+    r"card\s*number|your\s*transactions|transactions\b)",
+    re.I,
+)
+
+
 def read_layout(pages: Sequence[str]) -> TextLayout:
     """Which card each printed row belongs to, and each card's printed totals.
 
@@ -184,7 +197,7 @@ def read_layout(pages: Sequence[str]) -> TextLayout:
     can stand alone on the next page. So this reads the whole document in order.
     """
     pattern = _row_pattern(pages)
-    card, found = "", False
+    card, found, payments = "", False, False
     rows: list[TextRow] = []
     footers: dict[str, dict[str, Decimal]] = {}
     first: dict[int, str] = {}
@@ -192,6 +205,11 @@ def read_layout(pages: Sequence[str]) -> TextLayout:
         first[number] = card
         lines = page.splitlines()
         for position, line in enumerate(lines):
+            if _PAYMENTS_HEADING.match(line.strip()):
+                payments = True
+                continue
+            if _OTHER_HEADING.match(line.strip()):
+                payments = False
             if header := _CARD_HEADER.match(line):
                 card, found = header[1], True
             elif footer := _CARD_FOOTER.match(line):
@@ -201,7 +219,7 @@ def read_layout(pages: Sequence[str]) -> TextLayout:
                 )
             elif pattern is not None and pattern.match(line):
                 following = lines[position + 1] if position + 1 < len(lines) else ""
-                rows.append(TextRow(number, line, card, following))
+                rows.append(TextRow(number, line, card, following, payments))
     return TextLayout(tuple(rows), footers, first, found)
 
 
@@ -325,8 +343,12 @@ def _apply_text(
     if not any(abs(value) == abs(amount) for value in text_row.amounts):
         return
     printed = next(value for value in text_row.amounts if abs(value) == abs(amount))
+    row["payment_section"] = text_row.payment_section and printed > 0
+    if row["payment_section"]:
+        # Printed without a minus, but under the statement's own payments heading.
+        printed = -printed
     row["text_amount"] = str(printed)
-    row["sign_corrected"] = printed != amount
+    row["sign_corrected"] = printed != amount and not row["payment_section"]
     # A tax column prints "pre-tax  tax  total" and the three add up.
     values = text_row.amounts
     if len(values) >= 3 and values[-3] + values[-2] == values[-1] == printed:
@@ -436,26 +458,40 @@ def merge_pages(answers: Sequence[tuple[int, PrintedPage]], pages: Sequence[str]
     removed: list[dict[str, Any]] = []
     used: set[int] = set()
     order: list[float] = []
-    for page, answer in answers:
-        last = -1.0
-        for item in answer.transactions:
-            row = {**item.model_dump(), "page": page, "date_reference": reference}
-            dated = bool(item.trans_date or item.posting_date)
-            if is_non_transaction(item.description or "", dated=dated):
-                removed.append(row)
-                continue
-            index = _find_text_row(item, page, layout, used)
-            text_row = None
-            if index is not None:
-                used.add(index)
-                text_row = layout.rows[index]
-                last = float(index)
-            row["text_index"] = index
-            _apply_text(row, item, text_row, bool(layout.rows))
-            row["card_last4"] = _card_for(item, page, layout, text_row, summary["card_last4"] or "")
-            transactions.append(row)
-            # Printed order. A row not found in the text stays right after the one before it.
-            order.append(float(index) if index is not None else last + 0.5)
+    # Rows with an amount are matched to the printed lines first. A row without an amount
+    # then only gets a line nobody else took: seen with qwen2.5:7b on CIBC, an empty copy of
+    # the payment took the payment's line and pushed the real payment out.
+    entries = [
+        (page, seq, item)
+        for page, answer in answers
+        for seq, item in enumerate(answer.transactions)
+    ]
+    entries.sort(key=lambda entry: _model_amount(entry[2]) is None)
+    placed: dict[tuple[int, int], float] = {}
+    for page, seq, item in entries:
+        row = {**item.model_dump(), "page": page, "date_reference": reference}
+        dated = bool(item.trans_date or item.posting_date)
+        if is_non_transaction(item.description or "", dated=dated):
+            removed.append(row)
+            continue
+        index = _find_text_row(item, page, layout, used)
+        if index is None and _model_amount(item) is None and layout.rows:
+            # No amount and no printed line left for it: a copy of another row or a heading.
+            removed.append({**row, "reason": "no amount and no printed line left"})
+            continue
+        text_row = None
+        if index is not None:
+            used.add(index)
+            text_row = layout.rows[index]
+        row["text_index"] = index
+        _apply_text(row, item, text_row, bool(layout.rows))
+        row["card_last4"] = _card_for(item, page, layout, text_row, summary["card_last4"] or "")
+        transactions.append(row)
+        # Printed order; a row not found in the text stays right after the one before it.
+        earlier = [v for (p, q), v in placed.items() if p == page and q < seq]
+        position = float(index) if index is not None else max(earlier, default=-1.0) + 0.5
+        placed[(page, seq)] = position
+        order.append(position)
     transactions = [
         row
         for _, _, row in sorted(

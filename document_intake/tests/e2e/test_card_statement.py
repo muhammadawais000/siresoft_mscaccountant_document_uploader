@@ -16,6 +16,8 @@ from document_intake.services.extraction import run_extraction
 from document_intake.tests.card_fixtures import (
     BMO_PAGES,
     BMO_TEXT,
+    CIBC_PAGES,
+    CIBC_TEXT,
     TD_PAGES,
     TD_TEXT,
     PageProvider,
@@ -27,8 +29,8 @@ from document_intake.tests.factories import DocumentFactory
 
 pytestmark = pytest.mark.django_db
 HTMX = {"HTTP_HX_REQUEST": "true"}
-TEXT = {"bmo": BMO_TEXT, "td": TD_TEXT}
-PAGES = {"bmo": BMO_PAGES, "td": TD_PAGES}
+TEXT = {"bmo": BMO_TEXT, "td": TD_TEXT, "cibc": CIBC_TEXT}
+PAGES = {"bmo": BMO_PAGES, "td": TD_PAGES, "cibc": CIBC_PAGES}
 
 
 def extract(user, name, change=None, missed=None, text=None):
@@ -393,3 +395,24 @@ def test_card_totals_the_pdf_does_not_print_are_not_taken_from_the_model(auth_cl
     data = api(auth_client, doc)
     assert data["status"] == "ok", data["warnings"]
     assert data["checks"]["section_ok"] is None
+
+
+def test_cibc_payment_printed_without_minus_is_a_credit(auth_client, user) -> None:
+    """Seen on CIBC: "Your payments" lists PAYMENT THANK YOU 5,000.00 without a minus, and
+    the model added an empty copy of it. Purchases came out 5,000 too high."""
+    doc, _ = extract(user, "cibc")
+    data = api(auth_client, doc)
+    assert data["status"] == "ok", data["warnings"]
+    assert [r["amount"] for r in data["credits"]] == ["100.00", "5.00"]
+    assert [r["amount"] for r in data["debits"]] == ["30.00", "20.00"]
+    assert data["unclassified"] == []
+    assert data["balance"]["calculated_closing"] == "145.00"
+    assert data["checks"] == {
+        "closing_ok": True,
+        "debits_ok": True,
+        "credits_ok": True,
+        "rows_ok": True,
+        "section_ok": None,
+    }
+    assert any("payments heading; taken as credit" in note for note in data["notes"])
+    assert not any("reads like a payment" in w for w in data["warnings"])

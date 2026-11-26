@@ -178,6 +178,18 @@ def test_purchase_and_its_refund_on_the_same_dates_keep_their_signs() -> None:
     assert [r["text_amount"] for r in data["transactions"]] == ["67.44", "-67.44"]
 
 
+def test_payments_heading_marks_its_rows() -> None:
+    text = (
+        "Your payments\nJan 14 Jan 16 PAYMENT 100.00\nTotal payments $100.00\n"
+        "Your new charges and credits\nJan 15 Jan 16 SHOP 20.00"
+    )
+    rows = sp.read_layout([text]).rows
+    assert [r.payment_section for r in rows] == [True, False]
+    # A paragraph that starts with the same words is not a heading (BMO page 1).
+    paragraph = "Payments and credits received after this statement date and\n12/03 12/04 X $ 1.00"
+    assert [r.payment_section for r in sp.read_layout([paragraph]).rows] == [False]
+
+
 def test_sections_continue_across_pages() -> None:
     layout = sp.read_layout(pages_of(BMO_TEXT))
     assert layout.first_card == {1: "", 2: "3664", 3: "5124", 4: "5124", 5: "5124"}
