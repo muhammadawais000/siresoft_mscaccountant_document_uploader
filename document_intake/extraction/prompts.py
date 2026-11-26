@@ -73,7 +73,7 @@ TASK_PROMPTS: dict[str, str] = {
         "CREDITS, TOTAL DEBITS, Sub-total, rewards lines, headers, legal text and ads.\n"
         "- section_totals: the TOTAL CREDITS and TOTAL DEBITS lines printed per card.\n"
         "- summary: the statement summary if it is on this page, every amount with its printed "
-        "sign. statement_date, period_start and period_end as YYYY-MM-DD.\n"
+        "sign. statement_date, period_start, period_end and payment_due_date as YYYY-MM-DD.\n"
         "- The page may start in the middle of a card's section. A TOTAL line is not the end of "
         "the page: keep going.\n"
         "- rows_detected_in_text: how many transaction rows you see; rows_returned: how many you "

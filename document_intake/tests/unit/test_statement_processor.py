@@ -318,6 +318,38 @@ def test_section_check_names_the_card() -> None:
     assert "card 1111 debits 10.00, printed 12.00" in result.message
 
 
+def test_summary_is_read_next_to_its_label() -> None:
+    bmo = sp.read_summary(pages_of(BMO_TEXT))
+    assert bmo["previous_balance"] == "$7,296.26"
+    assert bmo["new_balance"] == "$6,988.41"
+    assert bmo["payments"] == "$-6,683.23"
+    assert bmo["cash_advances"] == "$-613.03"
+    assert bmo["payment_due_date"] == "01/24/2026"
+    td = sp.read_summary(pages_of(TD_TEXT))
+    assert td["previous_balance"] == "$20,730.89"
+    assert td["new_balance"] == "$19,717.42"
+    assert td["payments_and_credits"] == "$22,502.90"
+    assert td["purchases_and_other_charges"] == "$21,489.43"
+    assert (td["period_start"], td["period_end"]) == ("October07,2025", "November05,2025")
+
+
+@pytest.mark.parametrize(
+    ("line", "key", "expected"),
+    [
+        ("Total balance = $4,139.46", "new_balance", "$4,139.46"),
+        ("Total credits - $5,285.44 TTY 1 877 331-3338", "payments_and_credits", "-$5,285.44"),
+        ("Purchases 4,437.76", "net_purchases", "4,437.76"),
+        ("CashAdvances 22.99%", "cash_advances", None),  # a rate, not an amount
+        ("AnnualInterestRate: Purchases 19.99%", "interest", None),
+        ("Rewards balance year to date: $ 69.88", "new_balance", None),
+        ("Promotions&Adjustments + 2,479", "adjustments", None),  # reward points
+        ("December 28,2024to January 27, 2025", "period_start", "December 28,2024"),
+    ],
+)
+def test_summary_labels(line, key, expected) -> None:
+    assert sp.read_summary([line]).get(key) == expected
+
+
 @pytest.mark.parametrize(
     ("value", "text", "expected"),
     [

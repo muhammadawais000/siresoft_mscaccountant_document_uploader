@@ -16,7 +16,7 @@ from typing import Any
 
 from document_intake.validators.types import FieldInput, LineInput, Sev
 
-from .schemas import AMOUNT_KEYS, DATE_KEYS, HEADER_FIELDS, family
+from .schemas import AMOUNT_KEYS, DATE_KEYS, family, header_fields
 
 CENT = Decimal("0.01")
 _CURRENCY_TOKENS = re.compile(r"(?i)\b(CAD|USD|C\$|US\$)\b|\$")
@@ -221,7 +221,7 @@ def build_fields(doc_type: str, data: dict[str, Any], default_currency: str) -> 
     """Header rows for the review form, in display order."""
     return [
         FieldRow(key, label, position, parse_header(key, data.get(key), default_currency))
-        for position, (key, label) in enumerate(HEADER_FIELDS[family(doc_type)])
+        for position, (key, label) in enumerate(header_fields(doc_type))
     ]
 
 
@@ -357,8 +357,11 @@ def _card_line(line_no: int, item: dict[str, Any]) -> LineRow:
     line.posting_date = read(
         "posting_date", "Posting date", lambda v: parse_printed_date(v, reference)
     )
-    line.pre_tax = read("pre_tax_amount", "Pre-tax", parse_printed_amount)
-    line.tax = read("tax_amount", "Tax", parse_printed_amount)
+    # Pre-tax and tax read from the PDF line win over the model's copy.
+    pre_tax_key = "text_pre_tax" if item.get("text_pre_tax") else "pre_tax_amount"
+    tax_key = "text_tax" if item.get("text_tax") else "tax_amount"
+    line.pre_tax = read(pre_tax_key, "Pre-tax", parse_printed_amount)
+    line.tax = read(tax_key, "Tax", parse_printed_amount)
     # The signed amount read from the PDF line decides. Without a PDF line (a scan, or a row
     # not found in the text) the model's copy of the printed text is used.
     printed = read("amount_raw", "Amount", parse_printed_amount, "Amount is missing.")

@@ -110,6 +110,7 @@ CARD_PAGE_SCHEMA = _obj(
                 "statement_date": _DATE,
                 "period_start": _DATE,
                 "period_end": _DATE,
+                "payment_due_date": _DATE,
                 "previous_balance": _PRINTED,
                 "new_balance": _PRINTED,
                 "payments": _PRINTED,
@@ -203,12 +204,35 @@ HEADER_FIELDS: dict[str, list[tuple[str, str]]] = {
     ],
 }
 
+# Credit card statements show two more dates, after the period.
+CARD_HEADER_FIELDS: list[tuple[str, str]] = [
+    *HEADER_FIELDS["statement"][:4],
+    ("statement_date", "Statement date"),
+    ("payment_due_date", "Payment due date"),
+    *HEADER_FIELDS["statement"][4:],
+]
+
+
+def header_fields(doc_type: str) -> list[tuple[str, str]]:
+    if doc_type == DocType.CREDIT_CARD_STATEMENT:
+        return CARD_HEADER_FIELDS
+    return HEADER_FIELDS[family(doc_type)]
+
+
 # Field kinds drive normalisation (see parsing.py).
 AMOUNT_KEYS = frozenset(
     {"subtotal", "gst", "hst", "pst", "total", "opening_balance", "closing_balance"}
 )
 DATE_KEYS = frozenset(
-    {"invoice_date", "due_date", "posting_date", "statement_period_start", "statement_period_end"}
+    {
+        "statement_date",
+        "payment_due_date",
+        "invoice_date",
+        "due_date",
+        "posting_date",
+        "statement_period_start",
+        "statement_period_end",
+    }
 )
 # Fields the reviewer fills in; blank is their normal starting state, not "missing".
 REVIEWER_KEYS = frozenset({"posting_date", "account"})

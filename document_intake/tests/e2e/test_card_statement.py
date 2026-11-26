@@ -293,16 +293,54 @@ def test_last_row_under_a_new_card_is_asked_for_again(auth_client, user) -> None
     assert [x["line_no"] for x in data["lines"]] == list(range(1, 28))
 
 
-def test_balance_the_pdf_does_not_print_is_flagged(auth_client, user) -> None:
-    """Seen with qwen2.5:7b: New Account Balance read as 7,942.00."""
+def test_balances_come_from_the_pdf_text(auth_client, user) -> None:
+    """Seen with qwen2.5:7b: New Account Balance read as 7,942.00. The PDF label wins."""
 
     def misread(pages):
         pages[1]["summary"]["new_balance"] = "$ 7,942.00"
+        pages[1]["summary"]["previous_balance"] = None
 
     doc, _ = extract(user, "bmo", misread)
     data = api(auth_client, doc)
+    assert data["status"] == "ok", data["warnings"]
+    assert data["balance"]["previous"] == "7296.26"
+    assert data["balance"]["printed_closing"] == "6988.41"
+    fields = {f["key"]: f["value"] for f in data["header_fields"]}
+    assert fields["statement_date"] == "2026-01-03"
+    assert fields["payment_due_date"] == "2026-01-24"
+    # Not printed on BMO: the period ends on the statement date, the start is not guessed.
+    assert fields["statement_period_end"] == "2026-01-03"
+    assert fields["statement_period_start"] == ""
+
+
+def test_td_dates_and_period_from_the_text(auth_client, user) -> None:
+    doc, _ = extract(user, "td")
+    fields = {f["key"]: f["value"] for f in api(auth_client, doc)["header_fields"]}
+    assert fields["statement_date"] == "2025-11-05"
+    assert fields["statement_period_start"] == "2025-10-07"
+    assert fields["statement_period_end"] == "2025-11-05"
+
+
+def test_amount_the_pdf_does_not_print_is_flagged(auth_client, user) -> None:
+    def misread(pages):
+        pages[1]["summary"]["fees"] = "$ 12.34"  # the TD sample text prints no fees line
+
+    doc, _ = extract(user, "td", misread)
+    data = api(auth_client, doc)
     assert data["status"] == "needs_review"
-    assert data["checks"]["closing_ok"] is False
-    assert any("7,942.00 is not printed anywhere in the PDF" in w for w in data["warnings"])
-    issue = next(i for i in data["issues"] if i["rule_code"] == "card_value_not_in_text")
-    assert issue["field_key"] == "closing_balance"
+    assert any("12.34 is not printed anywhere in the PDF" in w for w in data["warnings"])
+    assert "card_value_not_in_text" in {i["rule_code"] for i in data["issues"]}
+
+
+def test_pre_tax_and_tax_come_from_the_pdf_line(auth_client, user) -> None:
+    """Seen with qwen2.5:7b: page 2 rows came back without pre-tax and tax."""
+
+    def drop_tax(pages):
+        for item in pages[2]["transactions"]:
+            item.update(pre_tax_amount=None, tax_amount=None)
+
+    doc, _ = extract(user, "bmo", drop_tax)
+    data = api(auth_client, doc)
+    assert data["totals"]["total_pretax"] == "6184.43"
+    assert data["totals"]["total_tax"] == "803.98"
+    assert all(row["tax"] is not None for row in data["debits"])

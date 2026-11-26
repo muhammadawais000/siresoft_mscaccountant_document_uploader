@@ -36,6 +36,7 @@ class PrintedSummary(_Printed):
     statement_date: str | None = None
     period_start: str | None = None
     period_end: str | None = None
+    payment_due_date: str | None = None
     previous_balance: str | None = None
     new_balance: str | None = None
     payments: str | None = None
@@ -326,6 +327,10 @@ def _apply_text(
     printed = next(value for value in text_row.amounts if abs(value) == abs(amount))
     row["text_amount"] = str(printed)
     row["sign_corrected"] = printed != amount
+    # A tax column prints "pre-tax  tax  total" and the three add up.
+    values = text_row.amounts
+    if len(values) >= 3 and values[-3] + values[-2] == values[-1] == printed:
+        row["text_pre_tax"], row["text_tax"] = str(values[-3]), str(values[-2])
 
 
 def _card_for(
@@ -344,6 +349,56 @@ def _card_for(
     return cards.pop() if len(cards) == 1 else last4(item.card_last4)
 
 
+# ------------------------------------------------------- summary read from the PDF text
+
+_AMT = r"([-+]?\s?\$?\s?-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})(?!\d|\s*%)"
+_SEP = r"\s*[:=]?\s*"
+# Label -> summary key. Spaces are optional because pdfplumber often drops them.
+_SUMMARY_LABELS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (key, re.compile(f"(?:{pattern})" + _SEP + _AMT, re.I))
+    for key, pattern in (
+        ("previous_balance", r"previous\s*(?:statement\s*|account\s*)?balance"),
+        ("new_balance", r"(?<![a-z])(?:total\s*)?new\s*(?:account\s*)?balance|^total\s*balance"),
+        ("payments_and_credits", r"payments\s*(?:&|and)\s*credits|^total\s*credits"),
+        ("payments", r"(?<![a-z])payments(?!\s*(?:&|and))"),
+        ("purchases_and_other_charges", r"purchases\s*(?:&|and)\s*other\s*charges"),
+        ("net_purchases", r"net\s*purchases|(?<![a-z&])purchases(?!\s*(?:&|and))"),
+        ("cash_advances", r"cash\s*advances?"),
+        ("interest", r"(?<![a-z])interest(?!\s*rate)"),
+        ("fees", r"(?<![a-z])fees"),
+        ("adjustments", r"(?<![a-z&])adjustments"),
+        ("other_charges", r"(?<![a-z&])other\s*charges"),
+    )
+)
+_DATE_TEXT = r"(\d{1,2}/\d{1,2}/\d{4}|[A-Za-z]{3,9}\.?\s?\d{1,2},?\s?\d{4})"
+_FORMAT = r"\s*(?:\((?:MM/DD/YYYY|DD/MM/YYYY)\))?"
+_DATE_LABELS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("statement_date", re.compile(r"statement\s*date" + _FORMAT + _SEP + _DATE_TEXT, re.I)),
+    ("payment_due_date", re.compile(r"payment\s*due\s*date" + _FORMAT + _SEP + _DATE_TEXT, re.I)),
+)
+_PERIOD = re.compile(_DATE_TEXT + r"\s*(?:to|-)\s*" + _DATE_TEXT, re.I)
+
+
+def read_summary(pages: Sequence[str]) -> dict[str, str]:
+    """Summary values printed next to their label (first page that has them).
+
+    These come from the PDF text, so they win over the model's copy. A label that is not
+    found leaves the model's value in place.
+    """
+    found: dict[str, str] = {}
+    for page in pages:
+        for line in page.splitlines():
+            for key, pattern in _SUMMARY_LABELS:
+                if key not in found and (match := pattern.search(line)):
+                    found[key] = match[1].replace(" ", "")
+            for key, pattern in _DATE_LABELS:
+                if key not in found and (match := pattern.search(line)):
+                    found[key] = match[1]
+            if "period_start" not in found and (period := _PERIOD.search(line)):
+                found["period_start"], found["period_end"] = period[1], period[2]
+    return found
+
+
 def printed_amounts(pages: Sequence[str]) -> set[Decimal]:
     """Every amount printed anywhere in the PDF text, without its sign."""
     return {abs(value) for page in pages for value in TextRow(0, page, "").amounts}
@@ -358,8 +413,13 @@ def merge_pages(answers: Sequence[tuple[int, PrintedPage]], pages: Sequence[str]
         for key, value in answer.summary.model_dump().items():
             if summary[key] is None and value is not None and value.strip():
                 summary[key] = value
-    for key in ("statement_date", "period_start", "period_end"):
+    from_text = read_summary(pages)
+    summary.update(from_text)
+    for key in ("statement_date", "period_start", "period_end", "payment_due_date"):
         summary[key] = _header_date(summary[key], text)
+    # The statement covers activity up to its statement date. The start is never guessed.
+    if summary["period_end"] is None and summary["period_start"] is None:
+        summary["period_end"] = summary["statement_date"]
     summary["card_last4"] = last4(summary["card_last4"]) or None
 
     reference: str | None = None
@@ -434,10 +494,13 @@ def merge_pages(answers: Sequence[tuple[int, PrintedPage]], pages: Sequence[str]
         "account_last4": summary["card_last4"],
         "statement_period_start": summary["period_start"],
         "statement_period_end": summary["period_end"],
+        "statement_date": summary["statement_date"],
+        "payment_due_date": summary["payment_due_date"],
         "currency": summary["currency"],
         "opening_balance": _plain_amount(summary["previous_balance"]),
         "closing_balance": _plain_amount(summary["new_balance"]),
         "summary": summary,
+        "summary_from_text": sorted(from_text),
         "section_totals": sections,
         "transactions": transactions,
         "removed_rows": removed,

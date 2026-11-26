@@ -116,6 +116,7 @@ BMO_TEXT = [
         "Statement",
         "Account Name: EXAMPLE INC Card Number: xxxx-xxxx-xxxx-6915",
         "Statement Date (MM/DD/YYYY): 01/03/2026 Currency: CANADIAN DOLLAR",
+        "Payment Due Date (MM/DD/YYYY): 01/24/2026",
         "Previous Balance: $ 7,296.26",
         "Payments: $ -6,683.23",
         "Net Purchases: $ 6,988.41",
