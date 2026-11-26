@@ -41,6 +41,10 @@ class CardReport(BaseModel):
     unverified: list[tuple[str, str]] = []
 
     @property
+    def receipts_attached(self) -> int:
+        return sum(1 for row in self.debits if row.receipts)
+
+    @property
     def has_tax(self) -> bool:
         return self.totals.total_tax is not None
 
@@ -50,6 +54,8 @@ class CardReport(BaseModel):
         details = data.pop("checks")
         for row, source in zip(data["credits"], self.credits, strict=True):
             row["amount"] = str(abs(source.amount)) if source.amount is not None else None
+        for row in data["debits"]:
+            row["receipt_missing"] = not row["receipts"]
         return {
             **data,
             "checks": {check.code: check.ok for check in self.checks},
@@ -85,6 +91,10 @@ def _row(line: ExtractedLine) -> processor.CardRow:
         pre_tax=line.pre_tax,
         tax=line.tax,
         amount=_signed(line),
+        receipts=[
+            {"id": str(receipt.pk), "filename": receipt.original_filename}
+            for receipt in line.receipts.all()
+        ],
     )
 
 

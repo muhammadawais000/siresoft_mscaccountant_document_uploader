@@ -35,4 +35,8 @@ urlpatterns = [
     path(doc + "mark-duplicate/", views.mark_duplicate, name="mark-duplicate"),
     path(doc + "reprocess/", views.reprocess, name="reprocess"),
     path(doc + "delete/", views.delete_document, name="delete-document"),
+    # Receipts on card statement purchases
+    path(doc + "lines/<uuid:line_id>/receipts/", views.attach_receipt, name="attach-receipt"),
+    path(doc + "receipts/<uuid:receipt_id>/", views.receipt_file, name="receipt-file"),
+    path(doc + "receipts/<uuid:receipt_id>/delete/", views.remove_receipt, name="remove-receipt"),
 ]

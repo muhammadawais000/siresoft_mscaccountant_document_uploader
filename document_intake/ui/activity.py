@@ -41,6 +41,14 @@ def _edit(m: dict[str, Any]) -> str:
 def describe(entry: AuditLog) -> str:
     m: dict[str, Any] = entry.metadata or {}
     action = entry.action
+    if m.get("target") == "receipt":
+        line = f"line {m.get('line_no')}" if m.get("line_no") else "a purchase"
+        if action == "upload":
+            return f"Attached a receipt to {line}"
+        if action == "delete":
+            return f"Removed a receipt from {line}"
+        if action == "download":
+            return "Viewed a receipt"
     if action == "upload":
         duplicate = ", duplicate of an earlier upload" if m.get("duplicate_of") else ""
         return f"Uploaded ({m.get('mime_type', 'file')}){duplicate}"

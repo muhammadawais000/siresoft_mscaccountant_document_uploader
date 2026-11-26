@@ -14,6 +14,9 @@
 <section class="panel lines lines--card" aria-labelledby="card-{{ table.key }}-title" id="card-{{ table.key }}">
   <div class="panel__header">
     <h2 class="panel__title" id="card-{{ table.key }}-title">{{ table.title }}</h2>
+    {% if table.key == "debits" and table.rows %}
+    <span class="field__hint" id="receipt-count">Receipts: {{ card.report.receipts_attached }} of {{ table.rows|length }}{% if card.receipts_missing %} · {{ card.receipts_missing }} missing{% endif %}</span>
+    {% endif %}
     {% if table.key == "unclassified" %}<span class="field__hint">Enter the amount; use a minus for a payment or refund</span>{% endif %}
     {% if editable and table.key == "debits" %}
     <button class="btn btn--sm" type="button" id="add-row" hx-post="{% url 'document_intake:add-line' document.pk %}">Add row</button>
@@ -27,6 +30,7 @@
           {% for col in table.columns %}
           <th scope="col" class="{% if col.kind == 'money' %}num lines__money{% elif col.kind == 'date' %}lines__date{% endif %}">{{ col.label }}</th>
           {% endfor %}
+          {% if table.key == "debits" %}<th scope="col" class="lines__receipt">Receipt</th>{% endif %}
           <th class="lines__state" scope="col"><span class="visually-hidden">Status</span></th>
           <th class="lines__remove" scope="col"><span class="visually-hidden">Remove</span></th>
         </tr>
@@ -44,6 +48,29 @@
                    {% if editable %}hx-post="{% url 'document_intake:edit-line' document.pk line.pk %}" hx-trigger="change"{% else %}disabled{% endif %}>
           </td>
           {% endfor %}
+          {% if table.key == "debits" %}
+          <td class="lines__receipt">
+            {% for receipt in line.receipts.all %}
+            <span class="receipt">
+              <a class="receipt__link" href="{% url 'document_intake:receipt-file' document.pk receipt.pk %}" target="_blank" rel="noopener" title="{{ receipt.original_filename }}">{{ receipt.original_filename }}</a>
+              {% if can_attach %}<button class="receipt__remove" type="button" id="receipt-remove-{{ receipt.pk }}" aria-label="Remove receipt {{ receipt.original_filename }}"
+                      hx-post="{% url 'document_intake:remove-receipt' document.pk receipt.pk %}"
+                      hx-confirm="Remove this receipt from line {{ line.line_no }}? It stays in the audit history."
+                      data-confirm-action="Delete">×</button>{% endif %}
+            </span>
+            {% empty %}
+            <span class="badge badge--warn receipt__missing">Receipt missing</span>
+            {% endfor %}
+            {% if can_attach %}
+            {# Choosing a file sends it at once; the panels come back with the receipt listed. #}
+            <form class="receipt__form" hx-post="{% url 'document_intake:attach-receipt' document.pk line.pk %}" hx-encoding="multipart/form-data" hx-trigger="change">
+              <label class="btn btn--sm btn--ghost receipt__add" for="receipt-file-{{ line.pk }}">{% if line.receipts.all %}Add{% else %}Upload{% endif %}</label>
+              <input class="visually-hidden" type="file" id="receipt-file-{{ line.pk }}" name="file" accept="{{ receipt_accept }}"
+                     aria-label="Upload a receipt for line {{ line.line_no }}">
+            </form>
+            {% endif %}
+          </td>
+          {% endif %}
           <td class="lines__state">
             {% if line.status != "ok" %}
             <span class="lines__flag lines__flag--{{ line.status }}" title="{{ line.status_reason }}"
@@ -59,7 +86,7 @@
           </td>
         </tr>
         {% endwith %}{% empty %}
-        <tr><td colspan="{{ table.columns|length|add:3 }}"><div class="empty">No rows</div></td></tr>
+        <tr><td colspan="{{ table.columns|length|add:4 }}"><div class="empty">No rows</div></td></tr>
         {% endfor %}
       </tbody>
       {% if table.totals %}
@@ -67,7 +94,7 @@
         <tr>
           <td colspan="{{ card.label_span }}">Total</td>
           {% for value in table.totals %}<td class="num">{{ value|money }}</td>{% endfor %}
-          <td colspan="2"></td>
+          <td colspan="{% if table.key == 'debits' %}3{% else %}2{% endif %}"></td>
         </tr>
       </tfoot>
       {% endif %}

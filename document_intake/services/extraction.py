@@ -32,7 +32,7 @@ from document_intake.models import (
 from document_intake.providers.base import ExtractionProvider, ModelRequest, get_provider
 from document_intake.signals import document_extracted
 
-from . import audit, card_extraction, lifecycle, validation
+from . import audit, card_extraction, lifecycle, receipts, validation
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +183,7 @@ def _store(
             )
             return None
         document = locked
+        previous = document.latest_result()
         last = document.results.aggregate(v=Max("version"))["v"] or 0
         result = ExtractionResult.objects.create(
             document=document,
@@ -227,6 +228,8 @@ def _store(
             )
             for row in line_rows
         )
+
+        receipts.carry_over(previous, result)
 
         document.extraction_method = prepared.method
         document.page_count = prepared.page_count

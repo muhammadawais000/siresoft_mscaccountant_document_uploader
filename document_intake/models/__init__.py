@@ -10,6 +10,7 @@ from .choices import (
 )
 from .document import Document
 from .extraction import ExtractedField, ExtractedLine, ExtractionResult, ValidationIssue
+from .receipt import TransactionReceipt
 
 __all__ = [
     "AuditAction",
@@ -25,5 +26,6 @@ __all__ = [
     "FieldStatus",
     "HardDeleteForbidden",
     "Severity",
+    "TransactionReceipt",
     "ValidationIssue",
 ]

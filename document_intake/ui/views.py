@@ -61,6 +61,7 @@ from document_intake.services import (
     export,
     lifecycle,
     query,
+    receipts,
     review,
     upload,
 )
@@ -345,7 +346,10 @@ def _latest_result(document: Document) -> ExtractionResult | None:
         .prefetch_related(
             "fields",
             "issues",
-            Prefetch("lines", queryset=ExtractedLine.objects.order_by("line_no")),
+            Prefetch(
+                "lines",
+                queryset=ExtractedLine.objects.order_by("line_no").prefetch_related("receipts"),
+            ),
         )
         .order_by("-version")
         .first()
@@ -394,7 +398,12 @@ def card_tables(report: card_statement.CardReport, lines: list[Any]) -> dict[str
         tables.append(
             {"key": key, "title": title, "columns": columns, "rows": entries, "totals": totals}
         )
-    return {"report": report, "tables": tables, "label_span": len(CARD_COLUMNS) + 1}
+    return {
+        "report": report,
+        "tables": tables,
+        "label_span": len(CARD_COLUMNS) + 1,
+        "receipts_missing": len(report.debits) - report.receipts_attached,
+    }
 
 
 def review_context(document: Document, *, can_review: bool) -> dict[str, Any]:
@@ -410,6 +419,9 @@ def review_context(document: Document, *, can_review: bool) -> dict[str, Any]:
         "can_review": can_review,
         "editable": can_review and document.status in EDITABLE,
         "in_progress": document.status in IN_PROGRESS,
+        # Receipts may be attached by anyone who can see the statement (clients keep them).
+        "can_attach": document.status not in IN_PROGRESS,
+        "receipt_accept": _accept(),
         "poll_seconds": POLL_SECONDS,
         "doc_type_label": dict(DocType.choices).get(
             document.effective_doc_type or document.doc_type, ""
@@ -475,8 +487,7 @@ def review_context(document: Document, *, can_review: bool) -> dict[str, Any]:
 def render_review_body(request: HttpRequest, document: Document) -> HttpResponse:
     """The right-hand panels (details, lines, totals, validation), re-rendered."""
     document.refresh_from_db()
-    # Only reached after get_document(..., review_action=True) passed, so the user may review.
-    context = review_context(document, can_review=True)
+    context = review_context(document, can_review=is_allowed(request, document, review_action=True))
     context["clear_messages"] = True  # an edit worked, so remove any old error message
     return render(request, "document_intake/partials/review_body.html", context)
 
@@ -645,6 +656,71 @@ def mark_duplicate(request: HttpRequest, pk: Any) -> HttpResponse:
 @require_POST
 def reprocess(request: HttpRequest, pk: Any) -> HttpResponse:
     return _action(request, pk, lambda doc: lifecycle.queue_reprocess(doc, request.user))
+
+
+# ------------------------------------------------------------------- receipts
+
+
+def _accept() -> str:
+    allowed: dict[str, tuple[str, ...]] = intake_settings.ALLOWED_MIME_TYPES
+    return ",".join([*sorted({ext for exts in allowed.values() for ext in exts}), *allowed])
+
+
+@intake_view
+@require_POST
+def attach_receipt(request: HttpRequest, pk: Any, line_id: Any) -> HttpResponse:
+    """Attach one receipt file to a purchase, then send back the fresh panels."""
+    document = get_document(request, pk)
+    upload_file = request.FILES.get("file")
+    if upload_file is None:
+        return show_message(request, "Choose a receipt file.")
+    if not UploadRateThrottle().allow_request(request, None):  # type: ignore[arg-type]
+        return show_message(request, "Too many uploads. Try later.")
+    try:
+        receipts.attach(document, line_id, upload_file, request.user)
+    except IntakeError as exc:
+        return show_message(request, str(exc))
+    except ObjectDoesNotExist:
+        raise Http404("Not found.") from None
+    return render_review_body(request, document)
+
+
+@intake_view
+@require_POST
+def remove_receipt(request: HttpRequest, pk: Any, receipt_id: Any) -> HttpResponse:
+    document = get_document(request, pk)
+    try:
+        receipts.remove(document, receipt_id, request.user)
+    except ObjectDoesNotExist:
+        raise Http404("Not found.") from None
+    return render_review_body(request, document)
+
+
+@intake_view
+@require_GET
+def receipt_file(request: HttpRequest, pk: Any, receipt_id: Any) -> FileResponse:
+    """The receipt file, after the permission check. Every view is in the audit log."""
+    document = get_document(request, pk)
+    try:
+        receipt = receipts.get(document, receipt_id)
+    except ObjectDoesNotExist:
+        raise Http404("Not found.") from None
+    download = request.GET.get("download") == "1"
+    audit.record(
+        AuditAction.DOWNLOAD,
+        document,
+        request.user,
+        target="receipt",
+        receipt=str(receipt.id),
+        disposition="attachment" if download else "inline",
+    )
+    response = FileResponse(receipt.file.open("rb"), content_type=receipt.mime_type)
+    response["Content-Disposition"] = (
+        content_disposition_header(download, receipt.original_filename) or "inline"
+    )
+    response["Cache-Control"] = "private, no-store"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 # ------------------------------------------------------------ files, preview, activity

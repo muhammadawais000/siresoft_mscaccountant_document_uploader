@@ -538,6 +538,7 @@ class CardRow(BaseModel):
     pre_tax: Decimal | None = None
     tax: Decimal | None = None
     amount: Decimal | None = None
+    receipts: list[dict[str, str]] = []
 
 
 class Totals(BaseModel):

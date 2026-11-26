@@ -260,8 +260,31 @@
 .lines--card .lines__cell[data-col="description"] { min-width: 150px; }
 .lines--card .lines__cell[data-col="card_last4"] { min-width: 40px; }
 .lines--card .lines__cell.num { min-width: 66px; }
-.lines--card tfoot td { position: sticky; bottom: 0; }
+.lines--card tfoot td { position: sticky; bottom: 0; z-index: 2; }
 .lines--card tfoot td.num { padding-right: var(--sp-2); }
+
+/* ------------------------------------------------------------- Receipts */
+.lines__receipt { min-width: 150px; max-width: 220px; }
+.lines--card td.lines__receipt { padding: var(--sp-1) var(--sp-2); white-space: normal; }
+.receipt { display: flex; align-items: center; gap: var(--sp-1); }
+.receipt__link {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+}
+.receipt__remove {
+  padding: 0 var(--sp-1);
+  border: 0;
+  background: none;
+  color: var(--c-ink-muted);
+  cursor: pointer;
+}
+.receipt__remove:hover { color: var(--c-err-ink); }
+.receipt__missing { margin-right: var(--sp-1); }
+.receipt__form { display: inline; }
+.receipt__add { cursor: pointer; }
 
 /* ----------------------------------------------------------------- Issues */
 .issues { list-style: none; margin: 0; padding: 0; }

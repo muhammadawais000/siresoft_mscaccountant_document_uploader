@@ -88,7 +88,8 @@ def validate_result(result: ExtractionResult) -> list[ValidationIssue]:
     """Validate ``result``, store its issues and update every field and line status."""
     doc_type = result.document.effective_doc_type
     field_rows = list(result.fields.all())
-    line_rows = list(result.lines.all())  # soft-deleted lines are excluded
+    # Soft-deleted lines are excluded; receipts are needed by the card report.
+    line_rows = list(result.lines.prefetch_related("receipts"))
     fields = {row.key: field_input(row) for row in field_rows}
     lines = [line_input(row, doc_type) for row in line_rows]
 

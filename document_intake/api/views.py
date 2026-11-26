@@ -87,7 +87,10 @@ class HealthView(APIView):
 def _result_queryset() -> QuerySet[ExtractionResult]:
     return ExtractionResult.objects.select_related("document").prefetch_related(
         "fields",
-        Prefetch("lines", queryset=ExtractedLine.objects.order_by("line_no")),
+        Prefetch(
+            "lines",
+            queryset=ExtractedLine.objects.order_by("line_no").prefetch_related("receipts"),
+        ),
         "issues",
     )
 

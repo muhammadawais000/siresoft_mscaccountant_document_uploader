@@ -592,6 +592,9 @@ def test_our_js_never_writes_html(name) -> None:
         ("export", {"rows": 4, "version": 1}, "Exported CSV (4 rows, version 1)"),
         ("reprocess", {}, "Requested a new extraction"),
         ("delete", {}, "Deleted the document"),
+        ("upload", {"target": "receipt", "line_no": 4}, "Attached a receipt to line 4"),
+        ("delete", {"target": "receipt", "line_no": 4}, "Removed a receipt from line 4"),
+        ("download", {"target": "receipt"}, "Viewed a receipt"),
     ],
 )
 def test_activity_sentences(action, metadata, expected) -> None:
